@@ -212,8 +212,8 @@ can always be invoked by hand."
   "Line prefix marking compile metadata to capture, or nil to disable.
 When a string, after each successful compile the first integer on a LaTeX
 log line beginning with it (the FINAL value) is paired with the caller's
-`:metadata' value (the INITIAL value) and stored as the cons
-`(:v 1 :nums (INITIAL . FINAL))' in the equation's `.eld' sidecar next to
+`:metadata' value (the INITIAL value) and stored as the plist
+`(:nums (INITIAL . FINAL))' in the equation's `.eld' sidecar next to
 its SVG, exposed by `latex-to-svg-backend-metadata' (on cache hit or miss).
 
 So the caller supplies INITIAL directly (a value it already knows, in
@@ -409,16 +409,32 @@ appended so the `varwidth' box uses that width (see that variable)."
      (format "\n\\makeatletter\\def\\sa@width{%s}\\makeatother"
              latex-to-svg-backend-line-width))))
 
+(defconst latex-to-svg-backend--cache-version 1
+  "Version number mixed into every cache file name.
+See `latex-to-svg-backend--cache-key'.
+Raise it by one when a code change makes the *old cached SVGs wrong* even
+though the LaTeX and preamble are unchanged — for example if we change a
+`dvisvgm' flag, the compile command, or the shape of the SVG we produce.
+Because the number is part of the file name, raising it gives every file
+a new name, so the stale ones are simply never found again (they get
+cleaned up later by the normal cache GC) and everything is recompiled
+fresh.
+
+Do NOT tie this to the TeX/dvisvgm version — upgrading TeX Live should
+not wipe the cache.  Change it by hand, only for a real incompatibility.")
+
 (defun latex-to-svg-backend--cache-key (latex)
   "Return a stable content cache key for LATEX.
-The preamble is folded in so changing it invalidates the cache.
-LATEX is the verbatim document body, so any change to it — including
-inline vs display delimiters or an injected `\setcounter' for
+The preamble is folded in so changing it invalidates the cache, as is
+`latex-to-svg-backend--cache-version' so a pipeline change re-keys warm
+caches.  LATEX is the verbatim document body, so any change to it —
+including inline vs display delimiters or an injected `\setcounter' for
 equation numbering — changes the key on its own.  The key names the
 on-disk SVG, which is both font- AND color-independent (equations
 are compiled with dvisvgm `--currentcolor', then sized and tinted at
 display time), so neither size nor color is part of this key."
-  (secure-hash 'sha1 (format "%s\0%s"
+  (secure-hash 'sha1 (format "%d\0%s\0%s"
+                             latex-to-svg-backend--cache-version
                              latex
                              (latex-to-svg-backend--preamble))))
 
@@ -763,7 +779,7 @@ emitted with a clickable link to it."
   "Write KEY's `.eld' sidecar pairing INITIAL with the compile's FINAL.
 Scans the just-finished compile's `equation.log' in scratch DIR for the
 first integer on a line beginning with `latex-to-svg-backend-metadata-prefix'
-\(FINAL), and writes `(:v 1 :nums (INITIAL . FINAL))' to `<KEY>.eld'.
+\(FINAL), and writes `(:nums (INITIAL . FINAL))' to `<KEY>.eld'.
 INITIAL is the caller's value (from `latex-to-svg-backend's `:metadata'), stored
 verbatim.  Writes nothing when the prefix is nil or no FINAL was found.
 Called on a successful compile, before DIR is cleaned up."
@@ -785,7 +801,7 @@ Called on a successful compile, before DIR is cleaned up."
       (when final
         (ignore-errors
           (with-temp-file (latex-to-svg-backend--meta-file key)
-            (prin1 (list :v 1 :nums (cons initial final)) (current-buffer))))))))
+            (prin1 (list :nums (cons initial final)) (current-buffer))))))))
 
 (defun latex-to-svg-backend--compile (key latex &optional metadata no-format)
   "Asynchronously compile LATEX to the color-independent cache SVG for KEY.
@@ -1009,7 +1025,7 @@ rarely needed."
 (defun latex-to-svg-backend-metadata (latex)
   "Return cached compile metadata for LATEX, or nil.
 
-Returns the plist `(:v 1 :nums (INITIAL . FINAL))' read from LATEX's
+Returns the plist `(:nums (INITIAL . FINAL))' read from LATEX's
 `.eld' sidecar: INITIAL is the caller's `:metadata' at render time and
 FINAL is the first integer the compile emitted on a
 `latex-to-svg-backend-metadata-prefix' line.  Available on cache hit or miss

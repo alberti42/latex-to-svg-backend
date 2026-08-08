@@ -122,8 +122,7 @@ The division of labour: the caller passes what it knows (`INITIAL`) as a Lisp va
 With `latex-to-svg-backend-metadata-prefix` set to `"L2S"`, a successful compile takes the first integer on a matching log line (`FINAL`), pairs it with `:metadata` (`INITIAL`), and writes `<hash>.eld` beside `<hash>.svg`:
 
 ```elisp
-;; metadata schema, v1
-(:v 1 :nums (INITIAL . FINAL))     ; e.g. (:v 1 :nums (7 . 7))
+(:nums (INITIAL . FINAL))     ; e.g. (:nums (7 . 7))
 ```
 
 `(latex-to-svg-backend-metadata BODY)` returns that plist (or `nil` if absent/corrupt).  Here the block shows equation numbers `INITIAL`…`FINAL` (just `(7)`); `FINAL < INITIAL` means it produced none.

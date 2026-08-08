@@ -365,7 +365,7 @@ kept for symmetry with the compile pipeline."
                 (latex-to-svg-backend--write-metadata key dir 3)
                 (should (file-exists-p (latex-to-svg-backend--meta-file key)))
                 (should (equal (latex-to-svg-backend-metadata latex)
-                               '(:v 1 :nums (3 . 3)))))
+                               '(:nums (3 . 3)))))
             (delete-directory dir t)))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
@@ -405,7 +405,7 @@ kept for symmetry with the compile pipeline."
         (progn
           (should-not (latex-to-svg-backend-metadata "$never$"))
           (with-temp-file (latex-to-svg-backend--meta-file (latex-to-svg-backend--cache-key "$x$"))
-            (insert "(:v 1 :nums (3 . "))    ; truncated, unreadable
+            (insert "(:nums (3 . "))    ; truncated, unreadable
           (should-not (latex-to-svg-backend-metadata "$x$")))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
@@ -428,7 +428,7 @@ kept for symmetry with the compile pipeline."
               (when (eq done 'pending) (accept-process-output nil 0.1)))
             (should (eq done t))
             (should (equal (latex-to-svg-backend-metadata doc)
-                           '(:v 1 :nums (7 . 7))))))
+                           '(:nums (7 . 7))))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-invalidate-drops-metadata-sidecar ()
@@ -439,7 +439,7 @@ kept for symmetry with the compile pipeline."
                (svg (latex-to-svg-backend--svg-file key))
                (meta (latex-to-svg-backend--meta-file key)))
           (with-temp-file svg (insert "<svg/>"))
-          (with-temp-file meta (prin1 '(:v 1 :nums (1 . 1))
+          (with-temp-file meta (prin1 '(:nums (1 . 1))
                                       (current-buffer)))
           (latex-to-svg-backend-invalidate "$x$")
           (should-not (file-exists-p svg))
@@ -649,7 +649,7 @@ kept for symmetry with the compile pipeline."
                (svg (latex-to-svg-backend--svg-file key))
                (eld (latex-to-svg-backend--meta-file key)))
           (with-temp-file svg (insert "<svg/>"))
-          (with-temp-file eld (prin1 '(:v 1 :nums (1 . 1)) (current-buffer)))
+          (with-temp-file eld (prin1 '(:nums (1 . 1)) (current-buffer)))
           (latex-to-svg-backend-invalidate "$y$")
           (should-not (file-exists-p svg))
           (should-not (file-exists-p eld)))
@@ -676,7 +676,7 @@ Return the SVG path."
               ;; A sidecar next to the stale SVG must go with it.
               (old-eld (latex-to-svg-backend--meta-file
                         (latex-to-svg-backend--cache-key "$old$"))))
-          (with-temp-file old-eld (prin1 '(:v 1 :nums (1 . 1)) (current-buffer)))
+          (with-temp-file old-eld (prin1 '(:nums (1 . 1)) (current-buffer)))
           (let ((res (latex-to-svg-backend-gc)))
             (should (= 1 (car res))))
           (should-not (file-exists-p old))
@@ -722,7 +722,7 @@ Return the SVG path."
               (eld (latex-to-svg-backend--meta-file
                     (latex-to-svg-backend--cache-key "$z$")))
               (fmt (latex-to-svg-backend--format-file "deadbeef")))
-          (with-temp-file eld (prin1 '(:v 1 :nums (1 . 1)) (current-buffer)))
+          (with-temp-file eld (prin1 '(:nums (1 . 1)) (current-buffer)))
           (with-temp-file fmt (insert "format"))
           (puthash "k@1.0@#000000" 'img latex-to-svg-backend--image-cache)
           (latex-to-svg-backend-clear-cache)
