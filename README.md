@@ -81,7 +81,7 @@ Note the recipe *name* stays `latex-to-svg-backend` (the feature you `require`),
 ## API
 
 ```elisp
-(latex-to-svg-backend LATEX &key callback metadata rescale-by)
+(latex-to-svg-backend LATEX &key callback metadata rescale-by color background padding)
 ```
 
 `LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the engine is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
@@ -89,6 +89,8 @@ Note the recipe *name* stays `latex-to-svg-backend` (the feature you `require`),
 Returns an image now when one can be produced synchronously (cache / on-disk SVG / placeholder), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile.
 
 `RESCALE-BY` (default `1.0`) multiplies the display size of this one call on top of `latex-to-svg-backend-font-scale`. The engine has no inline/display awareness, so a front-end that wants display equations a touch larger than inline passes, say, `:rescale-by 1.1` for display and nothing for inline. It is a display-time scale only — same on-disk SVG, no recompile — and folds into the in-memory image cache key, so both sizes coexist. `METADATA` is documented under [Compile metadata](#compile-metadata-eld-sidecar) below.
+
+`COLOR` and `BACKGROUND` override, for this one call, the tint and the box color (both color strings — `#rrggbb` or any name `color-name-to-rgb` understands). `COLOR` defaults to the buffer foreground (`latex-to-svg-backend-foreground-color`), which tracks the theme; `BACKGROUND` defaults to `nil` = transparent, so equations blend into the buffer. `PADDING` (a number of pt > 0) grows the `BACKGROUND` box beyond the ink on all sides — the SVG viewport is enlarged and a filled `<rect>` baked in — and scales with the equation; `nil` / `0` crops the box to the ink. Like `RESCALE-BY` they apply at display time only — same on-disk SVG, no recompile — and fold into the image cache key so variants coexist. The engine has no tint policy of its own beyond following the buffer face: a front-end owns any user-facing “fixed color” / “boxed equation” preference and passes it here.
 
 The image is tinted to the current buffer foreground and scaled to the buffer font at build time, so call it within the target buffer.
 

@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-10
+
+### Added
+
+- `:color`, `:background`, and `:padding` keyword arguments to
+  `latex-to-svg-backend`, for per-call control of the display-time tint, an
+  optional box color behind the otherwise transparent equation, and padding
+  that grows that box beyond the ink (the SVG viewport is enlarged and a
+  filled `<rect>` baked in; padding is in pt and scales with the equation).
+  All apply post-compile (same on-disk SVG, no recompile) and fold into the
+  in-memory image cache key, so tinted / boxed / padded variants of one
+  equation coexist. `:color` defaults to the buffer foreground
+  (theme-tracking, unchanged behavior); `:background` and `:padding` default
+  to nil (transparent, cropped to the ink). The engine keeps no tint policy
+  of its own beyond following the buffer face — a front-end owns the user
+  preference and passes it through (resolves alberti42/latex-to-svg-backend#1).
+
 ## [0.6.1] - 2026-08-10
 
 ### Changed
@@ -100,6 +117,7 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
+[0.7.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.4.0...v0.5.0

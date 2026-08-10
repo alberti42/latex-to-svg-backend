@@ -5,7 +5,7 @@
 ;; Author: Andrea Alberti <a.alberti82@gmail.com>
 ;; Maintainer: Andrea Alberti <a.alberti82@gmail.com>
 ;; URL: https://github.com/alberti42/latex-to-svg-backend
-;; Version: 0.6.1
+;; Version: 0.7.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tex, math, images
 
@@ -65,7 +65,7 @@
 ;;
 ;; Public entry point:
 ;;
-;;   (latex-to-svg-backend LATEX &key callback)
+;;   (latex-to-svg-backend LATEX &key callback color background padding)
 ;;
 ;; LATEX is placed *verbatim* in the document body, so the caller passes
 ;; valid body LaTeX and decides inline vs display by the delimiters it uses
@@ -77,6 +77,11 @@
 ;; compile; CALLBACK (a zero-argument function) is invoked once the SVG is
 ;; ready, so the caller can re-query and place the image.  Concurrent
 ;; requests for the same equation are coalesced onto a single compile.
+;;
+;; The optional `:color'/`:background'/`:padding' keys override the
+;; display-time tint, an optional box color behind the equation, and padding
+;; that grows that box beyond the ink (all apply post-compile, no recompile);
+;; a front-end owns the user-facing preference and passes it through.
 ;;
 ;; Helpers a front-end typically needs for its refresh policy:
 ;; `latex-to-svg-backend-available-p', `latex-to-svg-backend-appearance',
@@ -314,20 +319,26 @@ the same undisplayed SVG), which made preview sizing non-deterministic."
 
 ;;;; Colors and appearance
 
+(defun latex-to-svg-backend--color-to-hex (color fallback)
+  "Return COLOR (a name or `#rrggbb') as a `#rrggbb' string, or FALLBACK.
+FALLBACK is returned when COLOR is not a string or can't be resolved
+to RGB (e.g. an `unspecified-*' sentinel, or off a window system)."
+  ;; `color-name-to-rgb' both returns nil for unknown names and signals
+  ;; (e.g. on the "unspecified-fg" sentinel, or off a window system) —
+  ;; guard both so we always fall back cleanly.
+  (if-let* (((stringp color))
+            (rgb (ignore-errors (color-name-to-rgb color))))
+      (apply #'color-rgb-to-hex (append rgb '(2)))
+    fallback))
+
 (defun latex-to-svg-backend--svg-color (face attribute fallback)
   "Return FACE's ATTRIBUTE color as a `#rrggbb' string, or FALLBACK.
 
 ATTRIBUTE is `:foreground' or `:background'.  FALLBACK is returned
 when the attribute is unspecified or can't be resolved to RGB
 \(e.g. on a terminal that reports symbolic colors)."
-  (let ((color (face-attribute face attribute nil 'default)))
-    ;; `color-name-to-rgb' both returns nil for unknown names and
-    ;; signals (e.g. on the "unspecified-fg" sentinel, or off a window
-    ;; system) — guard both so we always fall back cleanly.
-    (if-let* (((stringp color))
-              (rgb (ignore-errors (color-name-to-rgb color))))
-        (apply #'color-rgb-to-hex (append rgb '(2)))
-      fallback)))
+  (latex-to-svg-backend--color-to-hex
+   (face-attribute face attribute nil 'default) fallback))
 
 (defun latex-to-svg-backend-foreground-color ()
   "Return the `#rrggbb' foreground equations should be tinted with now.
@@ -518,54 +529,129 @@ leaving the image at its natural size."
 
 ;;;; Image build
 
-(defun latex-to-svg-backend--load-svg-image (file &optional scale color)
+(defun latex-to-svg-backend--pad-svg (data pad background)
+  "Expand DATA's SVG viewport by PAD on all sides; fill BACKGROUND behind.
+PAD is a number in the SVG's own units (pt, at dvisvgm `--scale=1'),
+so it scales with the equation when the image is displayed.  The root
+`<svg>' `width'/`height'/`viewBox' are grown by 2*PAD and, when
+BACKGROUND (a color string) is non-nil, a filled `<rect>' covering the
+padded viewport is inserted behind the content so the box color extends
+PAD beyond the ink.  Returns DATA unchanged if the root tag can't be
+parsed (defensive: never break rendering over a padding request)."
+  (if-let* (((> pad 0))
+            ((string-match "<svg\\b[^>]*>" data))
+            (beg (match-beginning 0))
+            (end (match-end 0))
+            (tag (match-string 0 data))
+            ((string-match "\\bwidth='\\([0-9.eE+-]+\\)pt'" tag))
+            (w (string-to-number (match-string 1 tag)))
+            ((string-match "\\bheight='\\([0-9.eE+-]+\\)pt'" tag))
+            (h (string-to-number (match-string 1 tag)))
+            ((string-match
+              (concat "\\bviewBox='\\([0-9.eE+-]+\\) \\([0-9.eE+-]+\\) "
+                      "\\([0-9.eE+-]+\\) \\([0-9.eE+-]+\\)'")
+              tag))
+            (vx (string-to-number (match-string 1 tag)))
+            (vy (string-to-number (match-string 2 tag)))
+            (vw (string-to-number (match-string 3 tag)))
+            (vh (string-to-number (match-string 4 tag))))
+      (let* ((nx (- vx pad)) (ny (- vy pad))
+             (nw (+ vw (* 2 pad))) (nh (+ vh (* 2 pad)))
+             (new-tag tag)
+             (rect (if background
+                       (format "<rect x='%s' y='%s' width='%s' height='%s' fill='%s'/>"
+                               nx ny nw nh background)
+                     "")))
+        (setq new-tag (replace-regexp-in-string
+                       "\\bwidth='[0-9.eE+-]+pt'"
+                       (format "width='%spt'" (+ w (* 2 pad))) new-tag nil t)
+              new-tag (replace-regexp-in-string
+                       "\\bheight='[0-9.eE+-]+pt'"
+                       (format "height='%spt'" (+ h (* 2 pad))) new-tag nil t)
+              new-tag (replace-regexp-in-string
+                       "\\bviewBox='[^']*'"
+                       (format "viewBox='%s %s %s %s'" nx ny nw nh) new-tag nil t))
+        (concat (substring data 0 beg) new-tag rect (substring data end)))
+    data))
+
+(defun latex-to-svg-backend--load-svg-image (file &optional scale color background padding)
   "Return an SVG image from FILE, tinted COLOR and sized to the buffer font.
 The on-disk SVG emits its default ink as the literal token
 `currentColor' (dvisvgm `--currentcolor'); when COLOR (a `#rrggbb'
 string) is given it is substituted in, so the equation matches the
 buffer foreground without recompiling.  Scaled by SCALE (default
 `latex-to-svg-backend-display-scale') so the body font matches the
-surrounding text, and centred vertically for inline display."
+surrounding text, and centred vertically for inline display.
+
+The SVG is transparent; BACKGROUND, when non-nil (a color string),
+is painted behind it without recompiling.  Nil (the default) keeps
+the equation transparent so it blends into the buffer.  PADDING, a
+number of pt > 0, grows the SVG viewport on all sides (via
+`latex-to-svg-backend--pad-svg'), so the BACKGROUND box extends PADDING
+beyond the ink; it scales with the equation.  With PADDING the box is
+baked into the SVG (a `<rect>'); without it BACKGROUND is applied as
+`create-image' `:background'."
   (let ((data (with-temp-buffer
                 (insert-file-contents file)
-                (buffer-string))))
+                (buffer-string)))
+        (pad (and padding (> padding 0) padding)))
     (when color
       (setq data (replace-regexp-in-string "currentColor" color data t t)))
-    (create-image data 'svg t
-                  :scale (or scale (latex-to-svg-backend-display-scale))
-                  :ascent 'center)))
+    (when pad
+      (setq data (latex-to-svg-backend--pad-svg data pad background)))
+    (apply #'create-image data 'svg t
+           :scale (or scale (latex-to-svg-backend-display-scale))
+           :ascent 'center
+           ;; With padding the box is a baked-in <rect>; otherwise let
+           ;; `create-image' composite the background behind the SVG.
+           (and background (not pad) (list :background background)))))
 
-(defun latex-to-svg-backend--image-cache-key (key scale color)
-  "Return the in-memory image-cache key for content KEY at SCALE and COLOR.
+(defun latex-to-svg-backend--image-cache-key (key scale color &optional background padding)
+  "Return the image-cache key for KEY at SCALE, COLOR, BACKGROUND, PADDING.
 KEY names the font- and color-independent on-disk SVG; the cached
-image object bakes in a display `:scale' and a tint COLOR, so the
-in-memory key adds both.  Images at different font sizes or colors
-coexist, so a font or theme change just creates a new entry — no
-cache clearing, and a sibling buffer's warm images survive."
-  (format "%s@%s@%s" key scale color))
+image object bakes in a display `:scale', a tint COLOR, an optional
+BACKGROUND box, and its PADDING, so the in-memory key adds all four.
+Images at different font sizes, tints, box colors, or paddings coexist,
+so any such change just creates a new entry — no cache clearing, and a
+sibling buffer's warm images survive."
+  (format "%s@%s@%s@%s@%s" key scale color background padding))
 
-(defun latex-to-svg-backend--cached-image (key &optional rescale-by)
+(defun latex-to-svg-backend--cached-image (key &optional rescale-by color background padding)
   "Return the rendered image for content KEY at the current font and color.
-Checks the in-memory cache (keyed by KEY, the display scale, and the
-buffer foreground via `latex-to-svg-backend--image-cache-key', so each size /
-color has its own image), else loads KEY's on-disk SVG and caches a
-freshly scaled, tinted image.  RESCALE-BY (default 1.0) multiplies the
-display scale (see `latex-to-svg-backend-display-scale') and, via the scale,
-feeds the cache key, so different per-call sizes of the same equation
-coexist.  Returns nil when the SVG isn't on disk yet (its compile
-hasn't finished).  Reads the scale and color from the current buffer /
-frame, so call it within the target buffer to honour a buffer-local
-text scale."
+Checks the in-memory cache (keyed by KEY, the display scale, the tint
+color, the box background, and PADDING via
+`latex-to-svg-backend--image-cache-key', so each variant has its own image),
+else loads KEY's on-disk SVG and caches a freshly scaled, tinted image.
+RESCALE-BY (default 1.0) multiplies the display scale (see
+`latex-to-svg-backend-display-scale') and, via the scale, feeds the cache key,
+so different per-call sizes of the same equation coexist.  COLOR (a
+color string) overrides the tint; nil follows the buffer foreground
+\(`latex-to-svg-backend-foreground-color').  BACKGROUND (a color string) paints
+a box behind the equation; nil (the default) keeps it transparent.
+PADDING (pt) grows the BACKGROUND box beyond the ink.  All apply at
+display time only — same on-disk SVG, no recompile — and fold into the
+cache key so variants coexist.  Returns nil when the SVG isn't on disk
+yet (its compile hasn't finished).  Reads the scale and default color
+from the current buffer / frame, so call it within the target buffer
+to honour a buffer-local text scale."
   (let* ((scale (latex-to-svg-backend-display-scale rescale-by))
-         (color (car (latex-to-svg-backend--current-colors)))
-         (image-key (latex-to-svg-backend--image-cache-key key scale color)))
+         (color (latex-to-svg-backend--color-to-hex
+                 (or color (latex-to-svg-backend-foreground-color)) "#000000"))
+         ;; Resolve BACKGROUND to `#rrggbb' too: with padding it is baked into
+         ;; the SVG as a `<rect fill=...>', where an Emacs/X11 name (e.g.
+         ;; "gray97") is not valid; fall back to the original string if
+         ;; unresolvable (a valid CSS name / hex passes through unchanged).
+         (background (and background
+                          (latex-to-svg-backend--color-to-hex background background)))
+         (image-key (latex-to-svg-backend--image-cache-key
+                     key scale color background padding)))
     (or (gethash image-key latex-to-svg-backend--image-cache)
         (let ((file (latex-to-svg-backend--svg-file key)))
           (when (file-exists-p file)
             ;; Record the access for the LRU garbage collector.
             (latex-to-svg-backend--touch file)
             (puthash image-key
-                     (latex-to-svg-backend--load-svg-image file scale color)
+                     (latex-to-svg-backend--load-svg-image file scale color background padding)
                      latex-to-svg-backend--image-cache))))))
 
 ;;;; Placeholder
@@ -1034,7 +1120,7 @@ compile; all are notified when it finishes."
 
 ;;;; Public entry point
 
-(cl-defun latex-to-svg-backend (latex &key callback metadata rescale-by)
+(cl-defun latex-to-svg-backend (latex &key callback metadata rescale-by color background padding)
   "Return an SVG image for LATEX, or nil while it compiles.
 
 METADATA, when non-nil and `latex-to-svg-backend-metadata-prefix' is set, is the
@@ -1049,6 +1135,20 @@ touch larger than inline passes, say, `:rescale-by 1.1' for display and
 nothing for inline.  It is applied at display time only -- same on-disk SVG,
 no recompile — and folds into the in-memory image cache key, so the two
 sizes coexist.
+
+COLOR overrides the tint for this one call (a color string — `#rrggbb'
+or any name `color-name-to-rgb' understands); nil (the default) tints
+to the buffer foreground (`latex-to-svg-backend-foreground-color'), which
+tracks the theme.  BACKGROUND paints a box color behind the otherwise
+transparent equation (a color string); nil (the default) keeps it
+transparent so it blends into the buffer.  PADDING (a number of pt >
+0) grows that box beyond the ink on all sides (it scales with the
+equation); nil / 0 (the default) crops the box to the ink.  All apply
+at display time only -- same on-disk SVG, no recompile -- and fold
+into the in-memory image cache key, so tinted / boxed / padded
+variants coexist.  The engine has no tint policy of its own beyond
+following the buffer face; a front-end owns the user preference and
+passes it here.
 
 LATEX is placed *verbatim* in the LaTeX document body, so it must be
 valid there: pass math with its delimiters (`$x$', `\\(x\\)', `\\[x\\]')
@@ -1079,7 +1179,7 @@ the buffer font at build time, so call within the target buffer."
       (latex-to-svg-backend--placeholder latex))
      (t
       (let* ((key (latex-to-svg-backend--cache-key latex))
-             (image (latex-to-svg-backend--cached-image key rescale-by)))
+             (image (latex-to-svg-backend--cached-image key rescale-by color background padding)))
         (or image
             (progn
               (when callback

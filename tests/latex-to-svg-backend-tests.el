@@ -193,7 +193,11 @@
   (should-not (equal (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff")
                      (latex-to-svg-backend--image-cache-key "K" 1.5 "#fff")))
   (should-not (equal (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff")
-                     (latex-to-svg-backend--image-cache-key "K" 0.8 "#000"))))
+                     (latex-to-svg-backend--image-cache-key "K" 0.8 "#000")))
+  ;; Background is a distinct dimension too: a boxed variant of the same
+  ;; equation coexists with the transparent one (nil background).
+  (should-not (equal (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff")
+                     (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff" "#eee"))))
 
 (ert-deftest latex-to-svg-backend-load-svg-recolors-currentcolor ()
   ;; The on-disk SVG carries `currentColor'; loading substitutes the given
@@ -210,6 +214,52 @@
             (should (string-match-p "#abcdef" data))
             (should-not (string-match-p "currentColor" data))))
       (delete-file tmp))))
+
+(ert-deftest latex-to-svg-backend-load-svg-paints-background ()
+  ;; BACKGROUND is applied post-generation as `create-image' `:background'
+  ;; (the SVG stays transparent on disk); nil leaves the image transparent.
+  (let ((tmp (make-temp-file "l2s-bg" nil ".svg")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp
+            (insert "<svg xmlns='http://www.w3.org/2000/svg'>"
+                    "<path fill='currentColor' d='M0 0h1v1z'/></svg>"))
+          (should-not (image-property
+                       (latex-to-svg-backend--load-svg-image tmp 1.0 "#000")
+                       :background))
+          (should (equal (image-property
+                          (latex-to-svg-backend--load-svg-image tmp 1.0 "#000" "#eeeeee")
+                          :background)
+                         "#eeeeee")))
+      (delete-file tmp))))
+
+(ert-deftest latex-to-svg-backend-pad-svg-grows-viewport-and-boxes ()
+  ;; Padding grows the root <svg> width/height/viewBox by 2*PAD and, with a
+  ;; background, injects a filled <rect> covering the padded viewport behind
+  ;; the content.  The color is then baked into the SVG (not create-image's
+  ;; :background), so it extends PAD beyond the ink.
+  (let* ((svg (concat "<svg version='1.1' xmlns='http://www.w3.org/2000/svg' "
+                      "width='36pt' height='14pt' "
+                      "viewBox='-69 -70 36 14'>"
+                      "<path fill='#000' d='M0 0h1v1z'/></svg>"))
+         (out (latex-to-svg-backend--pad-svg svg 3 "#eeeeee")))
+    ;; Viewport grown by 2*PAD = 6 on each dimension, origin shifted by -PAD.
+    (should (string-match-p "width='42pt'" out))
+    (should (string-match-p "height='20pt'" out))
+    (should (string-match-p "viewBox='-72 -73 42 20'" out))
+    ;; A background rect covering the padded viewport, before the content.
+    (should (string-match-p
+             "<rect x='-72' y='-73' width='42' height='20' fill='#eeeeee'/>" out))
+    (should (< (string-match "<rect" out) (string-match "<path" out)))
+    ;; No rect without a background; PAD 0 is a no-op.
+    (should-not (string-match-p "<rect" (latex-to-svg-backend--pad-svg svg 3 nil)))
+    (should (equal (latex-to-svg-backend--pad-svg svg 0 "#eee") svg))))
+
+(ert-deftest latex-to-svg-backend-image-cache-key-includes-padding ()
+  ;; Padding is its own cache dimension, so a padded box coexists with an
+  ;; unpadded one of the same equation / size / colors.
+  (should-not (equal (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff" "#eee")
+                     (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff" "#eee" 3))))
 
 (ert-deftest latex-to-svg-backend-image-cache-coexists-per-scale ()
   ;; The same on-disk SVG cached at two display scales yields two distinct
