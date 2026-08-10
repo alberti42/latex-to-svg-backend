@@ -146,9 +146,9 @@ default is used (`\\linewidth', ~345pt).
 
 A *numbered* display sets its number flush right at this width, and TeX
 drops it onto a second line when the equation is wider, so the number
-stays on the line only while the equation fits within it.  Raise it
-(e.g. \"20cm\") when wide numbered equations wrap their number; lower it
-(e.g. \"6cm\") to tuck the number closer to the equation when every
+stays on the line only while the equation fits within it.  Raise it,
+say to \"20cm\", when wide numbered equations wrap their number; lower
+it, say to \"6cm\", to tuck the number closer to the equation when every
 equation is short.  Either way this just moves the right margin; the
 one rule is not to set it below your widest numbered equation (which
 would wrap).  Unnumbered content is unaffected (cropped to its ink).
@@ -501,7 +501,7 @@ The font height is read against a graphical frame (see
 `latex-to-svg-backend--graphic-frame') with the current buffer kept current, so
 it honours a buffer-local text scale and does not collapse to 1.0 when
 an async render fires while a TTY frame is selected.  Returns RESCALE-BY
-(scaled from 1.0) when no graphical frame exists (truly headless),
+scaled from 1.0 when no graphical frame exists (truly headless),
 leaving the image at its natural size."
   (let* ((buf (current-buffer))
          (rescale-by (or rescale-by 1.0))
@@ -633,7 +633,7 @@ already stripped, e.g. \"E=mc^2\"."
 (defun latex-to-svg-backend--latex-binary ()
   "Return the path to the LaTeX executable, or nil.
 Honours an absolute `latex-to-svg-backend-latex-program', else resolves the
-command name on `exec-path'.  Used for the format freshness check."
+command name on variable `exec-path'.  Used for the format freshness check."
   (let ((prog (car (split-string latex-to-svg-backend-latex-program))))
     (if (file-name-absolute-p prog)
         (and (file-executable-p prog) prog)
@@ -936,7 +936,7 @@ RESCALE-BY (default 1.0) multiplies the base display size for this one
 call, on top of the global `latex-to-svg-backend-font-scale'.  The engine has no
 inline/display awareness; a front-end that wants display equations a
 touch larger than inline passes, say, `:rescale-by 1.1' for display and
-nothing for inline.  It is a display-time scale only — same on-disk SVG,
+nothing for inline.  It is applied at display time only -- same on-disk SVG,
 no recompile — and folds into the in-memory image cache key, so the two
 sizes coexist.
 
