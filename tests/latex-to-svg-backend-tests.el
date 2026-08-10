@@ -404,7 +404,7 @@ completion event."
           (latex-to-svg-backend-tests--finish-fake-process
            dvisvgm-process 0))
         (should (= callbacks 1))
-        (should (equal metadata-seen '(:v 1 :nums (3 . 3))))
+        (should (equal metadata-seen '(:nums (3 . 3))))
         (should-not (gethash key latex-to-svg-backend--pending))
         (should-not (file-directory-p scratch))
         (should-not (buffer-live-p output-buffer))))))
@@ -421,7 +421,7 @@ completion event."
              (output-buffer (plist-get (aref latex-process 3) :buffer))
              (scratch (aref latex-process 4))
              (log (expand-file-name (concat key ".log")
-                                    (latex-to-svg-backend--key-dir key))))
+                                    (latex-to-svg-backend--shard-dir key))))
         (latex-to-svg-backend-tests--finish-fake-process
          latex-process 1 "latex stderr marker\n")
         (should (= (length l2s-test-processes) 1))
@@ -449,7 +449,7 @@ completion event."
              (scratch (aref latex-process 4))
              (dvi (expand-file-name "equation.dvi" scratch))
              (log (expand-file-name (concat key ".log")
-                                    (latex-to-svg-backend--key-dir key))))
+                                    (latex-to-svg-backend--shard-dir key))))
         (should-not (file-exists-p dvi))
         (latex-to-svg-backend-tests--finish-fake-process latex-process 0)
         (should (= (length l2s-test-processes) 1))
@@ -496,7 +496,7 @@ completion event."
              (dvi (expand-file-name "equation.dvi" scratch))
              (tex-log (expand-file-name "equation.log" scratch))
              (log (expand-file-name (concat key ".log")
-                                    (latex-to-svg-backend--key-dir key))))
+                                    (latex-to-svg-backend--shard-dir key))))
         (with-temp-file dvi
           (insert "fake dvi"))
         (with-temp-file tex-log
@@ -590,7 +590,7 @@ completion event."
             (latex-to-svg-backend-tests--finish-fake-process
              (car l2s-test-processes) 0)
             (should (= callbacks 1))
-            (should (equal metadata-seen '(:v 1 :nums (7 . 7))))
+            (should (equal metadata-seen '(:nums (7 . 7))))
             (should-not (gethash key latex-to-svg-backend--pending))
             (should-not (file-directory-p retry-scratch))
             (should-not (buffer-live-p retry-buffer))))))))
