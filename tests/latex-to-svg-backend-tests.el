@@ -1,5 +1,12 @@
 ;;; latex-to-svg-backend-tests.el --- Tests for latex-to-svg-backend -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 Andrea Alberti
+
+;; Author: Andrea Alberti <a.alberti82@gmail.com>
+;; Maintainer: Andrea Alberti <a.alberti82@gmail.com>
+;; Assisted-by: Claude:claude-opus-4-8
+;; URL: https://github.com/alberti42/latex-to-svg-backend
+
 ;;; Commentary:
 ;;
 ;; Run via:
