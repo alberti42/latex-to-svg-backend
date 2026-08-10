@@ -2,6 +2,8 @@
 
 A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering core extracted from [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer); front-ends do their own equation *detection* and image *placement* and delegate the typesetting here.
 
+Used by [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) (Org/Markdown math preview) and [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) (math in `agent-shell` output) — see [Related packages](#related-packages).
+
 ## Why
 
 Equations are compiled once and then recolored and rescaled **without recompiling** — the two things that are expensive if you bake color/size into the render:
