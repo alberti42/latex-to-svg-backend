@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-08-10
+
+### Changed
+
+- Run the `latex` → `dvisvgm` pipeline as direct `make-process` calls with
+  argv lists instead of a `cd … && … && …` string passed to
+  `start-process-shell-command`. Compilation no longer goes through
+  `shell-file-name`, so it is independent of the user's interactive shell
+  (e.g. Nu) and drops a layer of shell quoting. Each stage must exit zero
+  *and* produce its expected output before the next runs.
+
+### Fixed
+
+- On a failed compile, persist the combined TeX log and the captured
+  per-stage stdout/stderr (with terminal status, exit code, and sentinel
+  event) to the cache `.log`, so failures that never reach `equation.log`
+  (missing output, signals, spawn errors) are still diagnosable.
+
 ## [0.6.0] - 2026-08-08
 
 ### Added
@@ -82,6 +100,7 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
+[0.6.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.3.1...v0.4.0
