@@ -211,6 +211,41 @@ The `%&`-loaded `.fmt` approach is borrowed from the work of Karthik Chikmagalur
 
 Preview size is derived deterministically from the buffer font height and `-svg-dpi` (SVG `pt` = dpi/72 px). Earlier versions measured this per-frame with `image-size`, which proved unreliable on some ports (returning wildly different pixel sizes for the same undisplayed SVG) and made preview sizes non-deterministic — that measurement was removed in 0.2.2.
 
+## Troubleshooting
+
+The backend puts your LaTeX **verbatim** into a `standalone` document with a
+deliberately **minimal** preamble (`amsmath` + `xcolor`). This is a design
+choice, not an oversight: LaTeX has countless edge cases (extra packages,
+macros, encodings), and pulling them all into the default preamble would bloat
+it — every equation would compile slower, users would be forced to install a
+large TeX distribution for features they never use, and the more packages we
+load the higher the chance of version-based conflicts between them. So we keep
+the base lean and give you `latex-to-svg-backend-appended-preamble` to add
+exactly what a given input needs. It folds into the cache key, so changing it
+re-renders. A few common cases:
+
+- **`Unicode character ... not set up for use with LaTeX`** — the input
+  contains a raw Unicode character the base preamble doesn't know. A frequent
+  offender is a *combining* math accent such as `x̂` (an `x` followed by
+  U+0302 COMBINING CIRCUMFLEX ACCENT), which agents sometimes emit instead of
+  `\hat{x}`. Add the [`pdfmathaccents`](https://ctan.org/pkg/pdfmathaccents)
+  package, which maps combining accents onto their math-accent commands:
+
+  ```elisp
+  (setq latex-to-svg-backend-appended-preamble "\\usepackage{pdfmathaccents}")
+  ```
+
+  More generally, any missing character can be declared with `\DeclareUnicodeCharacter`
+  (from `inputenc`) or handled by loading the appropriate package.
+
+- **A macro or environment the input uses isn't defined** (`Undefined control
+  sequence`) — load the package that provides it (or define the macro) via
+  `latex-to-svg-backend-appended-preamble`.
+
+If a compile fails, the engine warns with a clickable link to the LaTeX
+`.log` (kept next to the cached SVG under `svg/`), which is the fastest way to
+see exactly what TeX objected to.
+
 ## Tests
 
 ```sh
