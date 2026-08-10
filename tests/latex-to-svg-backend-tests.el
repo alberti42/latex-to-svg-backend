@@ -116,11 +116,12 @@
 
 ;;;; Scale
 
-(ert-deftest latex-to-svg-backend-display-scale-is-1-when-headless ()
-  ;; With no graphical frame at all (batch) the font height is unknown, so
-  ;; the image is left at natural size.
-  (cl-letf (((symbol-function 'latex-to-svg-backend--graphic-frame) (lambda () nil)))
-    (should (equal (latex-to-svg-backend-display-scale) 1.0))))
+(ert-deftest latex-to-svg-backend-display-scale-nil-when-height-unknown ()
+  ;; With no font height known (batch: non-graphical selected frame, no
+  ;; FONT-HEIGHT passed) the scale is nil, not a guess: the caller defers
+  ;; sizing until the buffer is displayed (the SVG is size-independent).
+  (should (equal (latex-to-svg-backend-display-scale) nil))
+  (should (equal (latex-to-svg-backend-display-scale 1.3) nil)))
 
 (ert-deftest latex-to-svg-backend-px-per-pt-is-deterministic ()
   ;; Pixels-per-point is a pure function of `latex-to-svg-backend-svg-dpi' — no
@@ -132,38 +133,31 @@
 
 (ert-deftest latex-to-svg-backend-display-scale-matches-font ()
   ;; The display scale maps the LaTeX 10pt body font onto the buffer font
-  ;; height: scale = target * font-scale / (10 * dpi/72).  Stub the graphic
-  ;; frame + font height so the arithmetic is checked deterministically.
-  (cl-letf (((symbol-function 'latex-to-svg-backend--graphic-frame)
-             (lambda () (selected-frame)))
-            ((symbol-function 'default-font-height) (lambda (&rest _) 28)))
-    (let ((latex-to-svg-backend-svg-dpi 144.0))   ; dpi/72 = 2.0
-      (let ((latex-to-svg-backend-font-scale 1.0))
-        (should (equal (latex-to-svg-backend-display-scale)
-                       (/ 28.0 (* 10.0 2.0)))))
-      ;; Doubling font-scale doubles the displayed size.
-      (let* ((latex-to-svg-backend-font-scale 1.0)
-             (base (latex-to-svg-backend-display-scale))
-             (latex-to-svg-backend-font-scale 2.0))
-        (should (equal (latex-to-svg-backend-display-scale) (* 2 base)))))))
+  ;; height: scale = target * font-scale / (10 * dpi/72).  Pass FONT-HEIGHT
+  ;; directly so the arithmetic is checked deterministically (no frame).
+  (let ((latex-to-svg-backend-svg-dpi 144.0))   ; dpi/72 = 2.0
+    (let ((latex-to-svg-backend-font-scale 1.0))
+      (should (equal (latex-to-svg-backend-display-scale nil 28)
+                     (/ 28.0 (* 10.0 2.0)))))
+    ;; Doubling font-scale doubles the displayed size.
+    (let* ((latex-to-svg-backend-font-scale 1.0)
+           (base (latex-to-svg-backend-display-scale nil 28))
+           (latex-to-svg-backend-font-scale 2.0))
+      (should (equal (latex-to-svg-backend-display-scale nil 28) (* 2 base))))))
 
 (ert-deftest latex-to-svg-backend-display-scale-rescale-by-multiplies ()
   ;; RESCALE-BY is a per-call multiplier on top of the global font-scale, so
   ;; a front-end can size display equations larger than inline without
-  ;; touching the base.  Off a graphic frame it still scales the 1.0 default.
-  (cl-letf (((symbol-function 'latex-to-svg-backend--graphic-frame)
-             (lambda () (selected-frame)))
-            ((symbol-function 'default-font-height) (lambda (&rest _) 28)))
-    (let ((latex-to-svg-backend-svg-dpi 144.0)      ; dpi/72 = 2.0
-          (latex-to-svg-backend-font-scale 1.0))
-      (let ((base (latex-to-svg-backend-display-scale)))
-        (should (equal (latex-to-svg-backend-display-scale 1.0) base))
-        (should (< (abs (- (latex-to-svg-backend-display-scale 1.5) (* 1.5 base)))
-                   1e-9)))))
-  ;; Headless (no graphic frame): returns RESCALE-BY itself, not a bare 1.0.
-  (cl-letf (((symbol-function 'latex-to-svg-backend--graphic-frame) (lambda () nil)))
-    (should (equal (latex-to-svg-backend-display-scale) 1.0))
-    (should (equal (latex-to-svg-backend-display-scale 1.3) 1.3))))
+  ;; touching the base.  FONT-HEIGHT is passed explicitly (no frame guess).
+  (let ((latex-to-svg-backend-svg-dpi 144.0)      ; dpi/72 = 2.0
+        (latex-to-svg-backend-font-scale 1.0))
+    (let ((base (latex-to-svg-backend-display-scale nil 28)))
+      (should (equal (latex-to-svg-backend-display-scale 1.0 28) base))
+      (should (< (abs (- (latex-to-svg-backend-display-scale 1.5 28) (* 1.5 base)))
+                 1e-9))))
+  ;; No height known: nil (defer), regardless of RESCALE-BY.
+  (should (equal (latex-to-svg-backend-display-scale) nil))
+  (should (equal (latex-to-svg-backend-display-scale 1.3) nil)))
 
 ;;;; Appearance
 
@@ -328,6 +322,24 @@
       (should (= compiles 1))
       (should (= 2 (length (gethash (latex-to-svg-backend--cache-key "E=mc^2")
                                     latex-to-svg-backend--pending)))))))
+
+(ert-deftest latex-to-svg-backend-defers-when-compiled-but-unsizable ()
+  ;; SVG already on disk but no trustworthy size (--cached-image returns nil,
+  ;; e.g. the buffer is shown nowhere): the entry point returns nil and does
+  ;; NOT recompile — it defers to display time, when a real height exists.
+  (let ((tmp (make-temp-file "l2s-defer" nil ".svg"))
+        (compiles 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
+                  ((symbol-function 'latex-to-svg-backend-tools-available-p) (lambda () t))
+                  ((symbol-function 'latex-to-svg-backend--svg-file) (lambda (_k) tmp))
+                  ((symbol-function 'latex-to-svg-backend--cached-image) (lambda (&rest _) nil))
+                  ((symbol-function 'latex-to-svg-backend--compile)
+                   (lambda (&rest _) (cl-incf compiles))))
+          (should-not (latex-to-svg-backend "E=mc^2" :callback #'ignore))
+          ;; Compiled already -> no compile scheduled.
+          (should (= compiles 0)))
+      (delete-file tmp))))
 
 ;;;; Direct process pipeline
 

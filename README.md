@@ -81,7 +81,7 @@ Note the recipe *name* stays `latex-to-svg-backend` (the feature you `require`),
 ## API
 
 ```elisp
-(latex-to-svg-backend LATEX &key callback metadata rescale-by color background padding)
+(latex-to-svg-backend LATEX &key callback metadata rescale-by color background padding font-height)
 ```
 
 `LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the engine is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
@@ -92,6 +92,8 @@ Returns an image now when one can be produced synchronously (cache / on-disk SVG
 
 `COLOR` and `BACKGROUND` override, for this one call, the tint and the box color (both color strings — `#rrggbb` or any name `color-name-to-rgb` understands). `COLOR` defaults to the buffer foreground (`latex-to-svg-backend-foreground-color`), which tracks the theme; `BACKGROUND` defaults to `nil` = transparent, so equations blend into the buffer. `PADDING` (a number of pt > 0) grows the `BACKGROUND` box beyond the ink on all sides — the SVG viewport is enlarged and a filled `<rect>` baked in — and scales with the equation; `nil` / `0` crops the box to the ink. Like `RESCALE-BY` they apply at display time only — same on-disk SVG, no recompile — and fold into the image cache key so variants coexist. The engine has no tint policy of its own beyond following the buffer face: a front-end owns any user-facing “fixed color” / “boxed equation” preference and passes it here.
 
+`FONT-HEIGHT` (pixels) is the buffer font height to size against. A front-end that knows the buffer's actual display frame measures `default-font-height` there and passes it, so sizing never depends on which frame happens to be selected (e.g. an async callback while a TTY/daemon frame is current). When omitted, the selected frame is measured if it is graphical. When **no** height is known (omitted *and* the selected frame is non-graphical — a background/daemon render of a buffer shown in no window), the engine still ensures the size-independent SVG is compiled and cached, but returns `nil` rather than sizing against a guess — the front-end re-queries once the buffer is displayed (its display hook already does this for theme/font changes) and the image is built then, from cache, with no recompile. The `latex` → `dvisvgm` **compile** never needs a frame; only building the display image does.
+
 The image is tinted to the current buffer foreground and scaled to the buffer font at build time, so call it within the target buffer.
 
 Helpers a front-end typically needs for its refresh policy:
@@ -100,8 +102,8 @@ Helpers a front-end typically needs for its refresh policy:
 | --- | --- |
 | `latex-to-svg-backend-available-p` | SVG build support + graphical (or non-graphic opt-in) |
 | `latex-to-svg-backend-tools-available-p` | `latex` + `dvisvgm` on `exec-path` |
-| `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change |
-| `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font |
+| `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change; takes an optional `font-height` so it matches the render |
+| `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font; takes an optional `font-height`, and returns `nil` when no height is known (defer) |
 | `latex-to-svg-backend-foreground-color` | current tint color (`#rrggbb`) |
 | `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache |
 | `latex-to-svg-backend-metadata` | read back compile metadata for a LaTeX body (see below), on cache hit or miss |

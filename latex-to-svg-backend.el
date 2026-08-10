@@ -5,7 +5,7 @@
 ;; Author: Andrea Alberti <a.alberti82@gmail.com>
 ;; Maintainer: Andrea Alberti <a.alberti82@gmail.com>
 ;; URL: https://github.com/alberti42/latex-to-svg-backend
-;; Version: 0.7.0
+;; Version: 0.8.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tex, math, images
 
@@ -65,7 +65,7 @@
 ;;
 ;; Public entry point:
 ;;
-;;   (latex-to-svg-backend LATEX &key callback color background padding)
+;;   (latex-to-svg-backend LATEX &key callback color background padding font-height)
 ;;
 ;; LATEX is placed *verbatim* in the document body, so the caller passes
 ;; valid body LaTeX and decides inline vs display by the delimiters it uses
@@ -351,16 +351,21 @@ Both are `#rrggbb' strings resolved from the `default' face."
   (cons (latex-to-svg-backend-foreground-color)
         (latex-to-svg-backend--svg-color 'default :background "#ffffff")))
 
-(defun latex-to-svg-backend-appearance ()
+(defun latex-to-svg-backend-appearance (&optional font-height)
   "Return the appearance signature equations should render for now.
 A list (FOREGROUND BACKGROUND FONT-HEIGHT): the colors equations
 are tinted with (see `latex-to-svg-backend--current-colors') and the buffer
-font pixel height they are sized to (nil off a graphical frame).
-Front-ends compare this against the value stored at their last
-render to detect a color *or* font-size change and refresh."
+font pixel height they are sized to.  FONT-HEIGHT, when non-nil, is
+that height (a front-end that knows the buffer's actual display frame
+measures it there and passes it, so the signature matches the render);
+nil falls back to the selected frame's `default-font-height', or nil
+off a graphical frame.  Front-ends compare this against the value
+stored at their last render to detect a color *or* font-size change
+and refresh."
   (let ((colors (latex-to-svg-backend--current-colors)))
     (list (car colors) (cdr colors)
-          (and (display-graphic-p) (ignore-errors (default-font-height))))))
+          (or font-height
+              (and (display-graphic-p) (ignore-errors (default-font-height)))))))
 
 ;;;; Capability
 
@@ -477,23 +482,13 @@ ignored: the mtime is only a hint."
 
 ;;;; Scale
 
-(defun latex-to-svg-backend--graphic-frame ()
-  "Return a graphical frame to measure font metrics against, or nil.
-Prefer the selected frame when it is graphical; otherwise any graphical
-frame (so a render triggered while a TTY/daemon frame is selected — e.g.
-an async compile callback — still sizes against the GUI rather than
-collapsing to the fallback scale)."
-  (if (display-graphic-p)
-      (selected-frame)
-    (seq-find #'display-graphic-p (frame-list))))
-
 (defun latex-to-svg-backend--svg-px-per-pt ()
   "Return how many pixels Emacs renders one SVG point as.
 A constant derived from `latex-to-svg-backend-svg-dpi' (SVG `pt' = dpi/72 px).
 Not measured — see `latex-to-svg-backend-svg-dpi' for why."
   (/ latex-to-svg-backend-svg-dpi 72.0))
 
-(defun latex-to-svg-backend-display-scale (&optional rescale-by)
+(defun latex-to-svg-backend-display-scale (&optional rescale-by font-height)
   "Return the `create-image' :scale that sizes equations to the buffer font.
 
 Maps the LaTeX document's 10pt body font (the `standalone' default,
@@ -508,24 +503,21 @@ RESCALE-BY (default 1.0) is a per-call multiplier on top of the global
 equations slightly larger than inline ones, without touching the
 global base.
 
-The font height is read against a graphical frame (see
-`latex-to-svg-backend--graphic-frame') with the current buffer kept current, so
-it honours a buffer-local text scale and does not collapse to 1.0 when
-an async render fires while a TTY frame is selected.  Returns RESCALE-BY
-scaled from 1.0 when no graphical frame exists (truly headless),
-leaving the image at its natural size."
-  (let* ((buf (current-buffer))
-         (rescale-by (or rescale-by 1.0))
-         (frame (latex-to-svg-backend--graphic-frame))
-         (target (and frame
-                      (ignore-errors
-                        (with-selected-frame frame
-                          (with-current-buffer buf
-                            (default-font-height)))))))
-    (if target
-        (/ (* target latex-to-svg-backend-font-scale rescale-by)
-           (* 10.0 (latex-to-svg-backend--svg-px-per-pt)))
-      rescale-by)))
+The target font height comes from FONT-HEIGHT when given -- a front-end
+that knows the buffer's actual display frame measures `default-font-height'
+there and passes it, so sizing never depends on which frame happens to be
+selected.  Otherwise the selected frame is measured, but only when it is
+graphical (so a buffer-local text scale is honoured).  Returns nil when
+no height is known (no FONT-HEIGHT and a non-graphical selected frame,
+e.g. an async/daemon render of a buffer shown nowhere): the engine has
+nothing trustworthy to size against, so the caller should defer building
+the display image until the buffer is shown -- the on-disk SVG is size-
+independent, so it can be compiled now and sized later with no recompile."
+  (when-let* ((target (or font-height
+                          (and (display-graphic-p)
+                               (ignore-errors (default-font-height))))))
+    (/ (* target latex-to-svg-backend-font-scale (or rescale-by 1.0))
+       (* 10.0 (latex-to-svg-backend--svg-px-per-pt)))))
 
 ;;;; Image build
 
@@ -600,7 +592,7 @@ baked into the SVG (a `<rect>'); without it BACKGROUND is applied as
     (when pad
       (setq data (latex-to-svg-backend--pad-svg data pad background)))
     (apply #'create-image data 'svg t
-           :scale (or scale (latex-to-svg-backend-display-scale))
+           :scale (or scale 1.0)
            :ascent 'center
            ;; With padding the box is a baked-in <rect>; otherwise let
            ;; `create-image' composite the background behind the SVG.
@@ -616,7 +608,7 @@ so any such change just creates a new entry — no cache clearing, and a
 sibling buffer's warm images survive."
   (format "%s@%s@%s@%s@%s" key scale color background padding))
 
-(defun latex-to-svg-backend--cached-image (key &optional rescale-by color background padding)
+(defun latex-to-svg-backend--cached-image (key &optional rescale-by color background padding font-height)
   "Return the rendered image for content KEY at the current font and color.
 Checks the in-memory cache (keyed by KEY, the display scale, the tint
 color, the box background, and PADDING via
@@ -624,35 +616,38 @@ color, the box background, and PADDING via
 else loads KEY's on-disk SVG and caches a freshly scaled, tinted image.
 RESCALE-BY (default 1.0) multiplies the display scale (see
 `latex-to-svg-backend-display-scale') and, via the scale, feeds the cache key,
-so different per-call sizes of the same equation coexist.  COLOR (a
-color string) overrides the tint; nil follows the buffer foreground
+so different per-call sizes of the same equation coexist.  FONT-HEIGHT is
+passed through to `latex-to-svg-backend-display-scale' (the buffer font pixel
+height measured by the caller); COLOR (a color string) overrides the
+tint, nil follows the buffer foreground
 \(`latex-to-svg-backend-foreground-color').  BACKGROUND (a color string) paints
 a box behind the equation; nil (the default) keeps it transparent.
 PADDING (pt) grows the BACKGROUND box beyond the ink.  All apply at
 display time only — same on-disk SVG, no recompile — and fold into the
 cache key so variants coexist.  Returns nil when the SVG isn't on disk
-yet (its compile hasn't finished).  Reads the scale and default color
-from the current buffer / frame, so call it within the target buffer
-to honour a buffer-local text scale."
-  (let* ((scale (latex-to-svg-backend-display-scale rescale-by))
-         (color (latex-to-svg-backend--color-to-hex
-                 (or color (latex-to-svg-backend-foreground-color)) "#000000"))
-         ;; Resolve BACKGROUND to `#rrggbb' too: with padding it is baked into
-         ;; the SVG as a `<rect fill=...>', where an Emacs/X11 name (e.g.
-         ;; "gray97") is not valid; fall back to the original string if
-         ;; unresolvable (a valid CSS name / hex passes through unchanged).
-         (background (and background
-                          (latex-to-svg-backend--color-to-hex background background)))
-         (image-key (latex-to-svg-backend--image-cache-key
-                     key scale color background padding)))
-    (or (gethash image-key latex-to-svg-backend--image-cache)
-        (let ((file (latex-to-svg-backend--svg-file key)))
-          (when (file-exists-p file)
-            ;; Record the access for the LRU garbage collector.
-            (latex-to-svg-backend--touch file)
-            (puthash image-key
-                     (latex-to-svg-backend--load-svg-image file scale color background padding)
-                     latex-to-svg-backend--image-cache))))))
+yet (its compile hasn't finished) OR when no font height is known (see
+`latex-to-svg-backend-display-scale'): with no trustworthy size the caller
+should defer to display time rather than size against a guess."
+  (when-let* ((scale (latex-to-svg-backend-display-scale rescale-by font-height)))
+    (let* ((color (latex-to-svg-backend--color-to-hex
+                   (or color (latex-to-svg-backend-foreground-color)) "#000000"))
+           ;; Resolve BACKGROUND to `#rrggbb' too: with padding it is baked
+           ;; into the SVG as a `<rect fill=...>', where an Emacs/X11 name
+           ;; (e.g. "gray97") is not valid; fall back to the original string
+           ;; if unresolvable (a valid CSS name / hex passes through).
+           (background (and background
+                            (latex-to-svg-backend--color-to-hex background background)))
+           (image-key (latex-to-svg-backend--image-cache-key
+                       key scale color background padding)))
+      (or (gethash image-key latex-to-svg-backend--image-cache)
+          (let ((file (latex-to-svg-backend--svg-file key)))
+            (when (file-exists-p file)
+              ;; Record the access for the LRU garbage collector.
+              (latex-to-svg-backend--touch file)
+              (puthash image-key
+                       (latex-to-svg-backend--load-svg-image
+                        file scale color background padding)
+                       latex-to-svg-backend--image-cache)))))))
 
 ;;;; Placeholder
 
@@ -1120,7 +1115,7 @@ compile; all are notified when it finishes."
 
 ;;;; Public entry point
 
-(cl-defun latex-to-svg-backend (latex &key callback metadata rescale-by color background padding)
+(cl-defun latex-to-svg-backend (latex &key callback metadata rescale-by color background padding font-height)
   "Return an SVG image for LATEX, or nil while it compiles.
 
 METADATA, when non-nil and `latex-to-svg-backend-metadata-prefix' is set, is the
@@ -1149,6 +1144,18 @@ into the in-memory image cache key, so tinted / boxed / padded
 variants coexist.  The engine has no tint policy of its own beyond
 following the buffer face; a front-end owns the user preference and
 passes it here.
+
+FONT-HEIGHT (pixels) is the buffer font height to size against.  A
+front-end that knows the buffer's actual display frame measures
+`default-font-height' there and passes it, so sizing never depends on
+which frame is selected.  When omitted, the selected frame is measured
+if graphical.  When no height is known (omitted and the selected frame
+is non-graphical -- e.g. an async/daemon render of a buffer shown
+nowhere), the engine still ensures the (size-independent) SVG is
+compiled and cached, but returns nil instead of sizing against a guess:
+the caller re-queries once the buffer is displayed (where a trustworthy
+height exists) and the image is built then, from cache, with no
+recompile.
 
 LATEX is placed *verbatim* in the LaTeX document body, so it must be
 valid there: pass math with its delimiters (`$x$', `\\(x\\)', `\\[x\\]')
@@ -1179,12 +1186,22 @@ the buffer font at build time, so call within the target buffer."
       (latex-to-svg-backend--placeholder latex))
      (t
       (let* ((key (latex-to-svg-backend--cache-key latex))
-             (image (latex-to-svg-backend--cached-image key rescale-by color background padding)))
-        (or image
-            (progn
-              (when callback
-                (latex-to-svg-backend--enqueue key latex callback metadata))
-              nil)))))))
+             (compiled (file-exists-p (latex-to-svg-backend--svg-file key)))
+             (image (and compiled
+                         (latex-to-svg-backend--cached-image
+                          key rescale-by color background padding font-height))))
+        (cond
+         ;; SVG on disk and a trustworthy size: return the display image.
+         (image)
+         ;; Compiled, but no size context yet (buffer shown nowhere): defer.
+         ;; The caller re-renders when the buffer is displayed.
+         (compiled nil)
+         ;; Not compiled: ensure it is (eagerly, even with no size context),
+         ;; so it is ready when the buffer is later displayed; CALLBACK fires
+         ;; on completion so the caller re-queries and sizes it then.
+         (t (when callback
+              (latex-to-svg-backend--enqueue key latex callback metadata))
+            nil)))))))
 
 ;;;###autoload
 (defun latex-to-svg-backend-invalidate (latex)

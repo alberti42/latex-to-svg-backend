@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-10
+
+### Added
+
+- `:font-height` keyword argument to `latex-to-svg-backend`, and an optional
+  `font-height` argument to `latex-to-svg-backend-display-scale` and
+  `latex-to-svg-backend-appearance`. A front-end that knows the buffer's actual
+  display frame measures `default-font-height` there and passes it, so sizing
+  no longer depends on which frame happens to be selected.
+
+### Changed
+
+- Sizing no longer guesses a frame. Previously the engine picked "the selected
+  frame, else any graphical frame" to measure the font height, which could
+  land on an invisible child frame or a wrong frame during an async/daemon
+  render. Now the height comes from `:font-height` (caller-measured) or the
+  selected frame when it is graphical; there is no cross-frame search. The
+  internal `latex-to-svg-backend--graphic-frame` helper is removed.
+- When no font height is known (no `:font-height` and a non-graphical selected
+  frame — e.g. a background/daemon render of a buffer shown in no window),
+  `latex-to-svg-backend` now ensures the size-independent SVG is compiled and
+  cached but returns nil instead of sizing against a guess; the caller
+  re-queries once the buffer is displayed and the image is built then from
+  cache, with no recompile. Correspondingly `latex-to-svg-backend-display-scale`
+  returns nil (rather than a natural-size 1.0 fallback) when the height is
+  unknown. **Breaking** for callers that relied on the old headless
+  natural-size behavior.
+
 ## [0.7.0] - 2026-08-10
 
 ### Added
@@ -117,6 +145,7 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
+[0.8.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.5.0...v0.6.0
