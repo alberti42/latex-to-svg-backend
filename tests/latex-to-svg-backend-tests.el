@@ -731,6 +731,37 @@ kept for symmetry with the compile pipeline."
     (with-temp-file (expand-file-name "equation.log" dir) (insert body))
     dir))
 
+(ert-deftest latex-to-svg-backend-failure-log-copies-raw-bytes ()
+  ;; A TeX log echoing bytes that no default coding system can encode (an
+  ;; unrecognized Unicode char in the equation) must be copied verbatim, not
+  ;; make `write-region' prompt for a coding system from a background compile.
+  (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-rawlog" t))
+         (key (latex-to-svg-backend--cache-key "$\xce\xb1$"))
+         (raw (concat "! Package inputenc Error: Unicode character "
+                      (unibyte-string #xce #xb8) " not set up.\n"))
+         (dir (make-temp-file "l2s-rawlog-src" t))
+         (dst (expand-file-name (concat key ".log")
+                                (latex-to-svg-backend--shard-dir key))))
+    (unwind-protect
+        (progn
+          (let ((coding-system-for-write 'binary))
+            (write-region raw nil (expand-file-name "equation.log" dir)))
+          ;; `select-safe-coding-system' must never be reached.
+          (cl-letf (((symbol-function 'select-safe-coding-system)
+                     (lambda (&rest _) (error "prompted for a coding system")))
+                    ((symbol-function 'display-warning) #'ignore))
+            (latex-to-svg-backend--compile-failed key "$x$" dir "stderr tail\n"))
+          (should (file-exists-p dst))
+          (with-temp-buffer
+            (set-buffer-multibyte nil)
+            (let ((coding-system-for-read 'binary))
+              (insert-file-contents-literally dst))
+            (goto-char (point-min))
+            (should (search-forward (unibyte-string #xce #xb8) nil t))
+            (should (search-forward "stderr tail" nil t))))
+      (delete-directory dir t)
+      (delete-directory latex-to-svg-backend-cache-directory t))))
+
 (ert-deftest latex-to-svg-backend-metadata-round-trips ()
   ;; With a prefix set, `--write-metadata' captures FINAL (first integer on a
   ;; matching log line) and pairs it with the caller-supplied INITIAL, storing

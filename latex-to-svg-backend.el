@@ -6,7 +6,7 @@
 ;; Maintainer: Andrea Alberti <a.alberti82@gmail.com>
 ;; Assisted-by: Claude:claude-opus-4-8
 ;; URL: https://github.com/alberti42/latex-to-svg-backend
-;; Version: 0.8.0
+;; Version: 0.8.1
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tex, math, images
 
@@ -928,7 +928,11 @@ DIR is the scratch directory containing equation.log when LaTeX
 created one.  PROCESS-OUTPUT is the captured stdout and stderr from
 the direct LaTeX/dvisvgm processes.  A persistent log containing the
 available diagnostics is written to the cache directory, and a
-warning is emitted with a clickable link to it."
+warning is emitted with a clickable link to it.
+
+The log is copied byte-for-byte (`raw-text' in and out): a TeX log
+echoing an unencodable Unicode character would otherwise make
+`write-region' prompt for a coding system from a background compile."
   (let* ((log-src (expand-file-name "equation.log" dir))
          (log-dst (expand-file-name (concat key ".log")
                                     (latex-to-svg-backend--shard-dir key)))
@@ -936,16 +940,18 @@ warning is emitted with a clickable link to it."
          (have-output (not (string-empty-p (or process-output ""))))
          (snippet (truncate-string-to-width latex 60 nil nil t)))
     (when (or have-tex-log have-output)
-      (with-temp-file log-dst
-        (when have-tex-log
-          (insert-file-contents log-src)
-          (goto-char (point-max))
-          (unless (bolp)
-            (insert "\n")))
-        (when have-output
+      (let ((coding-system-for-read 'raw-text)
+            (coding-system-for-write 'raw-text))
+        (with-temp-file log-dst
           (when have-tex-log
-            (insert "\n--- process output ---\n"))
-          (insert process-output))))
+            (insert-file-contents log-src)
+            (goto-char (point-max))
+            (unless (bolp)
+              (insert "\n")))
+          (when have-output
+            (when have-tex-log
+              (insert "\n--- process output ---\n"))
+            (insert process-output)))))
     (display-warning
      'latex-to-svg-backend
      (format "LaTeX-to-SVG compile failed for: %s\nSee log: %s"
@@ -975,7 +981,8 @@ Called on a successful compile, before DIR is cleaned up."
           (final nil))
       (when (file-readable-p log)
         (with-temp-buffer
-          (insert-file-contents log)
+          (let ((coding-system-for-read 'raw-text))
+            (insert-file-contents log))
           (goto-char (point-min))
           (while (and (not final) (not (eobp)))
             (let ((line (buffer-substring-no-properties
