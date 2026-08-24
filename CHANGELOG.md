@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   half-guarded (the mtime bump ignored every error; the read that followed
   ignored none). Both are now covered by one handler that treats a vanished
   entry as a cache miss, so the equation simply recompiles.
+- A preamble that fails to dump to a `.fmt` is no longer retried for every
+  equation. The failure blocklisted nothing, so each equation paid for another
+  synchronous `latex -ini` run that could not succeed; it is now abandoned for
+  the session (with one warning) and the engine falls back to full compiles --
+  the behaviour a dump that fails *after* succeeding already had.
 - A cache entry the filesystem refuses to let us touch (root-owned after a run
   under `sudo`, or a read-only mount) no longer breaks rendering: the mtime is
   only a garbage-collection hint, so the refusal is reported once and the entry

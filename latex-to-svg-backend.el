@@ -869,15 +869,28 @@ blocklisted after an earlier failure."
            ;; Missing or stale -> (re)build, if mylatexformat is available.
            ((latex-to-svg-backend--precompile-available-p)
             (delete-file fmt)
-            (when-let* ((built (latex-to-svg-backend--build-format fkey)))
-              (puthash fkey t latex-to-svg-backend--format-checked)
-              built))))))))
+            (if-let* ((built (latex-to-svg-backend--build-format fkey)))
+                (progn
+                  (puthash fkey t latex-to-svg-backend--format-checked)
+                  built)
+              ;; The dump failed.  Give up on this preamble for the session:
+              ;; retrying would run a synchronous `latex -ini' for every
+              ;; equation, and a preamble that will not dump does not start
+              ;; dumping on the next attempt.
+              (latex-to-svg-backend--block-format fmt)
+              nil))))))))
 
 (defun latex-to-svg-backend--block-format (format-file)
-  "Abandon FORMAT-FILE after a compile that used it failed.
-Deletes the `.fmt' and blocklists its key so precompilation is skipped
-for this preamble for the rest of the session (the engine falls back to
-full compiles).  Warns once.  Called only when the same equation is
+  "Abandon FORMAT-FILE and skip precompilation for its preamble this session.
+Deletes the `.fmt' (if any) and blocklists its key, so `--ensure-format'
+returns nil for this preamble for the rest of the session and the engine
+falls back to full compiles.  Warns once — one warning per preamble, since
+the blocklist short-circuits every later call.
+
+Called from the two ways precompilation can fail: the dump itself failed
+\(see `latex-to-svg-backend--build-format'; the log stays in the
+`*latex-to-svg-backend-precompile*' buffer), or the dump succeeded but a
+compile that loaded it failed.  In the latter case the same equation is
 about to be retried with the full inline preamble, so a genuinely broken
 equation is not mistaken for a broken format."
   (let ((fkey (file-name-base format-file)))

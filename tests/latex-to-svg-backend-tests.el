@@ -320,6 +320,31 @@
         (should-not (latex-to-svg-backend--precompile-available-p))
         (should (= 1 warnings))))))
 
+(ert-deftest latex-to-svg-backend-failed-dump-is-not-retried-per-equation ()
+  ;; A preamble that will not dump is abandoned for the session: without this,
+  ;; every equation pays for another synchronous `latex -ini' run.
+  (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-fmt-block" t))
+        (builds 0)
+        (warnings 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'latex-to-svg-backend--precompile-available-p)
+                   (lambda () t))
+                  ((symbol-function 'latex-to-svg-backend--build-format)
+                   (lambda (&rest _) (cl-incf builds) nil))
+                  ((symbol-function 'display-warning)
+                   (lambda (&rest _) (cl-incf warnings))))
+          (clrhash latex-to-svg-backend--format-checked)
+          (clrhash latex-to-svg-backend--format-blocklist)
+          (should-not (latex-to-svg-backend--ensure-format))
+          (should-not (latex-to-svg-backend--ensure-format))
+          (should-not (latex-to-svg-backend--ensure-format))
+          ;; Dumped once, then blocklisted -- and said so once.
+          (should (= 1 builds))
+          (should (= 1 warnings))
+          (should (gethash (latex-to-svg-backend--format-key)
+                           latex-to-svg-backend--format-blocklist)))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
+
 (ert-deftest latex-to-svg-backend-build-format-reports-unstartable-latex ()
   ;; A LaTeX binary that vanished after the toolchain check is reported once;
   ;; the dump still yields nil so the caller falls back to a full compile.
