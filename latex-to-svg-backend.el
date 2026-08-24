@@ -786,10 +786,19 @@ either yields a distinct `.fmt' (and a rebuild on the next render)."
 (defun latex-to-svg-backend--precompile-available-p ()
   "Return non-nil when the preamble can be dumped to a `.fmt'.
 Requires the `mylatexformat' package: `mylatexformat.ltx' must be
-findable via `kpsewhich'."
+findable via `kpsewhich'.
+
+A `kpsewhich' that exits non-zero just means the package is not installed.
+A `kpsewhich' that cannot be started at all (moved by a toolchain upgrade
+mid-session) is a different matter: it is reported once
+\(`latex-to-svg-backend--warn-once') and treated as unavailable, so the
+engine falls back to full compiles."
   (and (executable-find "kpsewhich")
-       (eql 0 (ignore-errors
-                (call-process "kpsewhich" nil nil nil "mylatexformat.ltx")))))
+       (eql 0 (condition-case err
+                  (call-process "kpsewhich" nil nil nil "mylatexformat.ltx")
+                (file-error
+                 (latex-to-svg-backend--warn-once
+                  "probing for mylatexformat" err))))))
 
 (defun latex-to-svg-backend--build-format (fkey)
   "Dump the preamble to a precompiled format file for FKEY, synchronously.
@@ -797,7 +806,11 @@ Return the `.fmt' path on success, nil on failure.  Writes the preamble
 followed by `\\endofdump' to a scratch `.tex' in the `fmt/' subdirectory
 and runs `latex-to-svg-backend-latex-program' in `-ini' mode with
 `mylatexformat.ltx' to dump `<cache>/fmt/FKEY.fmt'.  The build log is in the
-`*latex-to-svg-backend-precompile*' buffer for inspection."
+`*latex-to-svg-backend-precompile*' buffer for inspection.
+
+A preamble that will not dump exits non-zero and yields nil (the caller
+falls back to a full compile, which reports the real LaTeX error).  A LaTeX
+program that cannot be started at all is reported once instead."
   (let* ((dir (latex-to-svg-backend--fmt-dir))
          (base (expand-file-name fkey dir))
          (fmt (concat base ".fmt"))
@@ -808,13 +821,20 @@ and runs `latex-to-svg-backend-latex-program' in `-ini' mode with
     (with-temp-file pre-tex
       (insert (latex-to-svg-backend--preamble) "\n\\endofdump\n"))
     (message "latex-to-svg-backend: precompiling LaTeX preamble...")
-    (let ((rv (ignore-errors
-                (call-process latex-to-svg-backend-latex-program nil buffer nil
-                              (concat "-output-directory=" dir)
-                              "-ini"
-                              (concat "-jobname=" fkey)
-                              (concat "&" (latex-to-svg-backend--latex-format-name))
-                              "mylatexformat.ltx" pre-tex))))
+    (let ((rv (condition-case err
+                  (call-process latex-to-svg-backend-latex-program nil buffer nil
+                                (concat "-output-directory=" dir)
+                                "-ini"
+                                (concat "-jobname=" fkey)
+                                (concat "&" (latex-to-svg-backend--latex-format-name))
+                                "mylatexformat.ltx" pre-tex)
+                ;; The program was on `exec-path' when the toolchain was
+                ;; checked but cannot be started now (a TeX Live upgrade
+                ;; mid-session moves it).  Report it once; the caller falls
+                ;; back to a full compile, which reports its own failure.
+                (file-error
+                 (latex-to-svg-backend--warn-once
+                  "dumping the LaTeX preamble" err)))))
       (delete-file pre-tex)
       (if (and (eql rv 0) (file-exists-p fmt))
           (progn (delete-file log) fmt)

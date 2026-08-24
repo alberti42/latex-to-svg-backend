@@ -22,6 +22,10 @@
 
 (require 'cl-lib)
 (require 'ert)
+;; `display-warning' is autoloaded, and `cl-letf' resolving that autoload
+;; loads warnings.el, which redefines it -- clobbering a stub installed in the
+;; same `cl-letf'.  Load it up front so stubbing it is deterministic.
+(require 'warnings)
 
 (add-to-list 'load-path
              (expand-file-name ".." (file-name-directory
@@ -295,6 +299,45 @@
               (should (equal (image-property img1 :scale) 0.8))
               (should (equal (image-property img2 :scale) 1.5)))))
       (delete-file tmp))))
+
+(ert-deftest latex-to-svg-backend-precompile-available-p-reports-unstartable ()
+  ;; A non-zero exit means `mylatexformat' is not installed -- an answer, not
+  ;; an error.  A `kpsewhich' that cannot be started (moved by a toolchain
+  ;; upgrade mid-session) is an error: reported once, treated as unavailable.
+  (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) "/usr/bin/kpsewhich")))
+    (cl-letf (((symbol-function 'call-process) (lambda (&rest _) 1)))
+      (should-not (latex-to-svg-backend--precompile-available-p)))
+    (let ((warnings 0))
+      (cl-letf (((symbol-function 'call-process)
+                 (lambda (&rest _)
+                   (signal 'file-missing
+                           (list "Searching for program" "No such file or directory"
+                                 "kpsewhich"))))
+                ((symbol-function 'display-warning)
+                 (lambda (&rest _) (cl-incf warnings))))
+        (clrhash latex-to-svg-backend--warned)
+        (should-not (latex-to-svg-backend--precompile-available-p))
+        (should-not (latex-to-svg-backend--precompile-available-p))
+        (should (= 1 warnings))))))
+
+(ert-deftest latex-to-svg-backend-build-format-reports-unstartable-latex ()
+  ;; A LaTeX binary that vanished after the toolchain check is reported once;
+  ;; the dump still yields nil so the caller falls back to a full compile.
+  (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-fmt-err" t))
+        (warnings 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'call-process)
+                   (lambda (&rest _)
+                     (signal 'file-missing
+                             (list "Searching for program" "No such file or directory"
+                                   "latex"))))
+                  ((symbol-function 'display-warning)
+                   (lambda (&rest _) (cl-incf warnings))))
+          (clrhash latex-to-svg-backend--warned)
+          (should-not (latex-to-svg-backend--build-format "deadbeef"))
+          (should-not (latex-to-svg-backend--build-format "deadbeef"))
+          (should (= 1 warnings)))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-warn-once-reports-each-type-once ()
   ;; A recovered error is reported, but only the first of each kind: one

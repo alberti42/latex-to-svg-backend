@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first occurrence of each error type warns (once per site and condition per
   session), so a misconfiguration such as an unwritable cache directory is
   diagnosable without a warning per equation.
+- A LaTeX toolchain program that cannot be *started* during preamble
+  precompilation -- `kpsewhich` or the LaTeX binary moved by a TeX Live upgrade
+  mid-session, after the toolchain check passed -- is now reported once instead
+  of being indistinguishable from "`mylatexformat` is not installed" or "the
+  preamble does not dump". The engine still falls back to full compiles.
 
 ### Fixed
 
