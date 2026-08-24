@@ -989,14 +989,71 @@ kept for symmetry with the compile pipeline."
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-metadata-missing-and-corrupt-yield-nil ()
-  ;; No sidecar => nil; a half-written / corrupt sidecar => nil, not an error.
-  (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-meta-bad" t)))
+  ;; No sidecar => nil, and nothing to report (an equation compiled before the
+  ;; prefix was set simply has none).  A half-written / corrupt sidecar => nil
+  ;; too, but that one is reported -- once, not per query.
+  (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-meta-bad" t))
+        (warnings 0))
     (unwind-protect
-        (progn
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _) (cl-incf warnings))))
+          (clrhash latex-to-svg-backend--warned)
           (should-not (latex-to-svg-backend-metadata "$never$"))
+          (should (= 0 warnings))
           (with-temp-file (latex-to-svg-backend--meta-file (latex-to-svg-backend--cache-key "$x$"))
             (insert "(:nums (3 . "))    ; truncated, unreadable
-          (should-not (latex-to-svg-backend-metadata "$x$")))
+          (should-not (latex-to-svg-backend-metadata "$x$"))
+          (should-not (latex-to-svg-backend-metadata "$x$"))
+          (should (= 1 warnings)))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
+
+(ert-deftest latex-to-svg-backend-write-metadata-failure-lets-the-equation-through ()
+  ;; --write-metadata runs in the compile sentinel, before the pending
+  ;; callbacks fire: a sidecar it cannot write must be reported, not signalled,
+  ;; or a successfully compiled equation would never be placed.
+  (let ((latex-to-svg-backend-metadata-prefix "L2S")
+        (dir (make-temp-file "l2s-meta-w" t))
+        (warnings 0))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "equation.log" dir) (insert "L2S 42\n"))
+          (cl-letf (((symbol-function 'latex-to-svg-backend--meta-file)
+                     (lambda (&rest _) "/l2s-no-such-dir-9182/x.eld"))
+                    ((symbol-function 'display-warning)
+                     (lambda (&rest _) (cl-incf warnings))))
+            (clrhash latex-to-svg-backend--warned)
+            (latex-to-svg-backend--write-metadata "K" dir 3)
+            (latex-to-svg-backend--write-metadata "K" dir 3)
+            (should (= 1 warnings))))
+      (delete-directory dir t))))
+
+(ert-deftest latex-to-svg-backend-unusable-gc-stamp-is-reported-and-self-heals ()
+  ;; The GC cadence stamp: an unusable one means "never collected", so the next
+  ;; GC runs and rewrites it.  Each *kind* of corruption is reported once.
+  (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-gc-stamp" t))
+        (warnings 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _) (cl-incf warnings))))
+          (clrhash latex-to-svg-backend--warned)
+          ;; Never collected: not an error.
+          (should (= 0 (latex-to-svg-backend--last-gc-time)))
+          (should (= 0 warnings))
+          ;; Truncated by a crash mid-write.
+          (with-temp-file (latex-to-svg-backend--gc-stamp-file) (insert "(12345"))
+          (should (= 0 (latex-to-svg-backend--last-gc-time)))
+          (should (= 0 (latex-to-svg-backend--last-gc-time)))
+          (should (= 1 warnings))
+          ;; Parses, but is not a time -- a different diagnosis, so it is
+          ;; reported too (once).
+          (with-temp-file (latex-to-svg-backend--gc-stamp-file) (insert "yesterday"))
+          (should (= 0 (latex-to-svg-backend--last-gc-time)))
+          (should (= 0 (latex-to-svg-backend--last-gc-time)))
+          (should (= 2 warnings))
+          ;; Self-healing: a GC rewrites a usable stamp.
+          (latex-to-svg-backend--record-gc-time)
+          (should (> (latex-to-svg-backend--last-gc-time) 0))
+          (should (= 2 warnings)))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-metadata-captured-from-real-compile ()

@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first occurrence of each error type warns (once per site and condition per
   session), so a misconfiguration such as an unwritable cache directory is
   diagnosable without a warning per equation.
+- A `.eld` metadata sidecar or GC timestamp that cannot be written or read
+  back (unwritable cache directory, a file truncated by a crash mid-write) is
+  now reported once instead of silently yielding no metadata. An unusable GC
+  timestamp is also validated as a number, not just as readable syntax.
 - A display that cannot resolve colors at all, and a frame whose default font
   cannot be measured, are now reported once each instead of silently falling
   back to the default color / deferring the equation's size forever.

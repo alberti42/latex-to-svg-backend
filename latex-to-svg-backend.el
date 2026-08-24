@@ -1088,9 +1088,15 @@ Called on a successful compile, before DIR is cleaned up."
                     (setq final (string-to-number (match-string 0 rest)))))))
             (forward-line 1))))
       (when final
-        (ignore-errors
-          (with-temp-file (latex-to-svg-backend--meta-file key)
-            (prin1 (list :nums (cons initial final)) (current-buffer))))))))
+        (condition-case err
+            (with-temp-file (latex-to-svg-backend--meta-file key)
+              (prin1 (list :nums (cons initial final)) (current-buffer)))
+          ;; This runs in the compile sentinel, *before* the pending callbacks
+          ;; fire: signalling here would leave a successfully compiled equation
+          ;; unplaced.  The sidecar is a cache, so report the failure once and
+          ;; let the equation through.
+          (file-error
+           (latex-to-svg-backend--warn-once "writing compile metadata" err)))))))
 
 (defun latex-to-svg-backend--compile (key latex &optional metadata no-format)
   "Asynchronously compile LATEX to the color-independent cache SVG for KEY.
@@ -1363,10 +1369,14 @@ once LATEX has compiled at least once with the prefix set; nil otherwise (a
 corrupt or half-written sidecar also yields nil)."
   (let ((file (latex-to-svg-backend--meta-file (latex-to-svg-backend--cache-key latex))))
     (when (file-readable-p file)
-      (ignore-errors
-        (with-temp-buffer
-          (insert-file-contents file)
-          (read (current-buffer)))))))
+      (condition-case err
+          (with-temp-buffer
+            (insert-file-contents file)
+            (read (current-buffer)))
+        ;; A sidecar truncated by a crash mid-write, or collected by another
+        ;; session between the check and the read: no metadata, reported once.
+        ((end-of-file invalid-read-syntax file-error)
+         (latex-to-svg-backend--warn-once "reading compile metadata" err))))))
 
 ;;;; Cache maintenance (garbage collection)
 
@@ -1389,20 +1399,36 @@ corrupt or half-written sidecar also yields nil)."
   (expand-file-name "gc-timestamp" (latex-to-svg-backend--cache-dir)))
 
 (defun latex-to-svg-backend--last-gc-time ()
-  "Return the `float-time' of the last recorded GC, or 0 if never / unreadable."
+  "Return the `float-time' of the last recorded GC, or 0 if never / unreadable.
+An unusable stamp is reported once and treated as \"never collected\", which
+is self-healing: the next GC runs and rewrites the stamp."
   (let ((f (latex-to-svg-backend--gc-stamp-file)))
     (or (and (file-readable-p f)
-             (ignore-errors
-               (with-temp-buffer
-                 (insert-file-contents f)
-                 (read (current-buffer)))))
+             (condition-case err
+                 (let ((stamp (with-temp-buffer
+                                (insert-file-contents f)
+                                (read (current-buffer)))))
+                   (if (numberp stamp)
+                       stamp
+                     ;; Parsed, but not a time -- corrupt just the same.
+                     (latex-to-svg-backend--warn-once
+                      "reading the GC timestamp"
+                      (list 'invalid-read-syntax f))))
+               ((end-of-file invalid-read-syntax file-error)
+                (latex-to-svg-backend--warn-once
+                 "reading the GC timestamp" err))))
         0)))
 
 (defun latex-to-svg-backend--record-gc-time ()
-  "Persist the current time as the last GC time (for the daily cadence)."
-  (ignore-errors
-    (with-temp-file (latex-to-svg-backend--gc-stamp-file)
-      (prin1 (float-time) (current-buffer)))))
+  "Persist the current time as the last GC time (for the daily cadence).
+A cache directory that cannot be written is reported once; the cadence is
+then simply not persisted, so the next idle check collects again -- harmless,
+since collecting an already-collected cache frees nothing."
+  (condition-case err
+      (with-temp-file (latex-to-svg-backend--gc-stamp-file)
+        (prin1 (float-time) (current-buffer)))
+    (file-error
+     (latex-to-svg-backend--warn-once "recording the GC timestamp" err))))
 
 ;;;###autoload
 (defun latex-to-svg-backend-gc ()
