@@ -410,17 +410,17 @@
     (cl-letf (((symbol-function 'display-warning)
                (lambda (&rest _) (cl-incf warnings))))
       (clrhash latex-to-svg-backend--warned)
-      (latex-to-svg-backend--warn-once "touching" '(permission-denied "nope"))
-      (latex-to-svg-backend--warn-once "touching" '(permission-denied "nope"))
+      (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope"))
+      (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope"))
       (should (= 1 warnings))
       ;; A different condition in the same context is its own diagnosis.
-      (latex-to-svg-backend--warn-once "touching" '(file-error "other"))
+      (latex-to-svg-backend--warn-once "touching" '(file-error "Other"))
       (should (= 2 warnings))
       ;; So is the same condition somewhere else.
-      (latex-to-svg-backend--warn-once "writing" '(permission-denied "nope"))
+      (latex-to-svg-backend--warn-once "writing" '(permission-denied "Nope"))
       (should (= 3 warnings))
       ;; Returns nil, so it can tail a recovery handler.
-      (should-not (latex-to-svg-backend--warn-once "touching" '(file-error "x"))))))
+      (should-not (latex-to-svg-backend--warn-once "touching" '(file-error "Other"))))))
 
 (ert-deftest latex-to-svg-backend-touch-warns-once-when-refused ()
   ;; An unwritable cache entry (root-owned after a run under sudo, or a
