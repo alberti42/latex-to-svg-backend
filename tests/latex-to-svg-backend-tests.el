@@ -364,6 +364,45 @@
           (should (= 1 warnings)))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
+(ert-deftest latex-to-svg-backend-color-to-hex-reports-colorless-display ()
+  ;; An unknown name or an `unspecified-*' sentinel is nil, not an error: fall
+  ;; back silently.  A display that cannot resolve even white makes
+  ;; `color-name-to-rgb' signal; that falls back too, but is reported once.
+  (should (equal "#123456"
+                 (latex-to-svg-backend--color-to-hex "unspecified-fg" "#123456")))
+  (let ((warnings 0))
+    (cl-letf (((symbol-function 'color-name-to-rgb)
+               (lambda (&rest _) (signal 'wrong-type-argument (list 'numberp nil))))
+              ((symbol-function 'display-warning)
+               (lambda (&rest _) (cl-incf warnings))))
+      (clrhash latex-to-svg-backend--warned)
+      (should (equal "#123456"
+                     (latex-to-svg-backend--color-to-hex "grey50" "#123456")))
+      (should (equal "#123456"
+                     (latex-to-svg-backend--color-to-hex "grey80" "#123456")))
+      ;; One diagnosis for the display, not one per color.
+      (should (= 1 warnings)))))
+
+(ert-deftest latex-to-svg-backend-font-height-reports-unmeasurable-font ()
+  ;; Off a graphical frame there is nothing to measure and nothing to report.
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
+    (should-not (latex-to-svg-backend--font-height)))
+  ;; On a graphical frame, `default-font-height' signals when `font-info'
+  ;; cannot open the frame's font.  Reported once, and the height stays
+  ;; unknown so the caller defers sizing rather than guessing.
+  (let ((warnings 0))
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+              ((symbol-function 'default-font-height)
+               (lambda (&rest _) (signal 'wrong-type-argument (list 'arrayp nil))))
+              ((symbol-function 'display-warning)
+               (lambda (&rest _) (cl-incf warnings))))
+      (clrhash latex-to-svg-backend--warned)
+      (should-not (latex-to-svg-backend--font-height))
+      (should-not (latex-to-svg-backend--font-height))
+      (should (= 1 warnings))
+      ;; Deferred, not guessed: no scale, so no image is built at a fiction.
+      (should-not (latex-to-svg-backend-display-scale)))))
+
 (ert-deftest latex-to-svg-backend-warn-once-reports-each-type-once ()
   ;; A recovered error is reported, but only the first of each kind: one
   ;; warning per context/condition pair, not one per equation.

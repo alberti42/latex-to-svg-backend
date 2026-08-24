@@ -346,11 +346,16 @@ is a short phrase naming what failed, e.g. \"recording cache use\"."
   "Return COLOR (a name or `#rrggbb') as a `#rrggbb' string, or FALLBACK.
 FALLBACK is returned when COLOR is not a string or can't be resolved
 to RGB (e.g. an `unspecified-*' sentinel, or off a window system)."
-  ;; `color-name-to-rgb' both returns nil for unknown names and signals
-  ;; (e.g. on the "unspecified-fg" sentinel, or off a window system) —
-  ;; guard both so we always fall back cleanly.
+  ;; `color-name-to-rgb' returns nil for an unknown name or an
+  ;; `unspecified-*' sentinel -- no error, just no color.  It signals only
+  ;; when the display cannot resolve even white: it normalizes against
+  ;; `(float (car (color-values "#ffffffffffff")))', so a colorless display
+  ;; gives `wrong-type-argument'.  Report that once; either way, fall back.
   (if-let* (((stringp color))
-            (rgb (ignore-errors (color-name-to-rgb color))))
+            (rgb (condition-case err
+                     (color-name-to-rgb color)
+                   (wrong-type-argument
+                    (latex-to-svg-backend--warn-once "resolving a color" err)))))
       (apply #'color-rgb-to-hex (append rgb '(2)))
     fallback))
 
@@ -374,6 +379,25 @@ Both are `#rrggbb' strings resolved from the `default' face."
   (cons (latex-to-svg-backend-foreground-color)
         (latex-to-svg-backend--svg-color 'default :background "#ffffff")))
 
+(defun latex-to-svg-backend--font-height ()
+  "Return the selected frame's default font pixel height, or nil.
+Nil off a graphical frame: there is nothing to measure there, and the
+engine deliberately does not search for another frame (a graphical frame
+in `frame-list' may be an invisible child frame).  Callers that know the
+buffer's real display frame measure it there and pass `:font-height'
+instead.
+
+Also nil when the font cannot be measured: on a graphical frame
+`default-font-height' reads `font-info', which reports nil for a font it
+cannot open, and then signals `wrong-type-argument'.  That is reported once
+\(`latex-to-svg-backend--warn-once') and treated as an unknown height, so
+sizing is deferred rather than guessed."
+  (and (display-graphic-p)
+       (condition-case err
+           (default-font-height)
+         (wrong-type-argument
+          (latex-to-svg-backend--warn-once "measuring the buffer font" err)))))
+
 (defun latex-to-svg-backend-appearance (&optional font-height)
   "Return the appearance signature equations should render for now.
 A list (FOREGROUND BACKGROUND FONT-HEIGHT): the colors equations
@@ -387,8 +411,7 @@ stored at their last render to detect a color *or* font-size change
 and refresh."
   (let ((colors (latex-to-svg-backend--current-colors)))
     (list (car colors) (cdr colors)
-          (or font-height
-              (and (display-graphic-p) (ignore-errors (default-font-height)))))))
+          (or font-height (latex-to-svg-backend--font-height)))))
 
 ;;;; Capability
 
@@ -546,9 +569,7 @@ e.g. an async/daemon render of a buffer shown nowhere): the engine has
 nothing trustworthy to size against, so the caller should defer building
 the display image until the buffer is shown -- the on-disk SVG is size-
 independent, so it can be compiled now and sized later with no recompile."
-  (when-let* ((target (or font-height
-                          (and (display-graphic-p)
-                               (ignore-errors (default-font-height))))))
+  (when-let* ((target (or font-height (latex-to-svg-backend--font-height))))
     (/ (* target latex-to-svg-backend-font-scale (or rescale-by 1.0))
        (* 10.0 (latex-to-svg-backend--svg-px-per-pt)))))
 
