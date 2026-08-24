@@ -334,14 +334,40 @@ the same undisplayed SVG), which made preview sizing non-deterministic."
 (defvar latex-to-svg-backend--warned (make-hash-table :test 'equal)
   "Context/condition pairs already reported this session.")
 
-(defun latex-to-svg-backend--warn-once (context err)
-  "Report ERR under CONTEXT once per error type this session.  Return nil.
+;; Buffer-scoped marks live with the buffer, so they are discarded when it is
+;; killed and never accumulate for a long-lived process, a rename cannot re-arm
+;; them, and a reopened document is genuinely a new one.
+(defvar-local latex-to-svg-backend--warned-in-buffer nil
+  "Context/condition pairs already reported in this buffer.")
+
+(defun latex-to-svg-backend--warn-once (context err &optional scope)
+  "Report ERR under CONTEXT once, and return nil.
 For an error the engine recovers from: the recovery is reported rather than
-silenced, but only the first occurrence of each error type warns.  CONTEXT
-is a short phrase naming what failed, e.g. \"recording cache use\"."
-  (let ((seen (format "%s/%s" context (car err))))
-    (unless (gethash seen latex-to-svg-backend--warned)
-      (puthash seen t latex-to-svg-backend--warned)
+silenced, but a recurring one does not warn per equation.  CONTEXT is a
+short phrase naming what failed, e.g. \"recording cache use\".
+
+SCOPE says how often \"once\" is.  Nil means once per session, recorded in
+`latex-to-svg-backend--warned'.  `buffer' means once per buffer, marked
+buffer-locally in `latex-to-svg-backend--warned-in-buffer': the display
+path is entered from the buffer being rendered, so a problem that persists
+is re-reported for each document opened, rather than once for the life of a
+process -- an Emacs server runs for weeks, and a single warning there is
+easily missed or long stale.  Equations within one buffer still share one
+warning.
+
+Callers reached from a process sentinel or an idle timer must leave SCOPE
+nil: the buffer current there is unrelated to the equation (our own process
+output buffer, or whatever the timer interrupted), so marking it would both
+misattribute the diagnosis and warn far too often."
+  (let* ((seen (format "%s/%s" context (car err)))
+         (fresh (if (eq scope 'buffer)
+                    (unless (member seen latex-to-svg-backend--warned-in-buffer)
+                      (push seen latex-to-svg-backend--warned-in-buffer)
+                      t)
+                  (unless (gethash seen latex-to-svg-backend--warned)
+                    (puthash seen t latex-to-svg-backend--warned)
+                    t))))
+    (when fresh
       (display-warning 'latex-to-svg-backend
                        (format "%s: %s" context (error-message-string err))
                        :warning)))
@@ -362,7 +388,7 @@ to RGB (e.g. an `unspecified-*' sentinel, or off a window system)."
             (rgb (condition-case err
                      (color-name-to-rgb color)
                    (wrong-type-argument
-                    (latex-to-svg-backend--warn-once "resolving a color" err)))))
+                    (latex-to-svg-backend--warn-once "resolving a color" err 'buffer)))))
       (apply #'color-rgb-to-hex (append rgb '(2)))
     fallback))
 
@@ -403,7 +429,7 @@ sizing is deferred rather than guessed."
        (condition-case err
            (default-font-height)
          (wrong-type-argument
-          (latex-to-svg-backend--warn-once "measuring the buffer font" err)))))
+          (latex-to-svg-backend--warn-once "measuring the buffer font" err 'buffer)))))
 
 (defun latex-to-svg-backend-appearance (&optional font-height)
   "Return the appearance signature equations should render for now.
@@ -541,7 +567,8 @@ untouched, ages out, and recompiles."
       (set-file-times file)
     ;; A collected entry belongs to the caller, which turns it into a miss.
     (file-missing (signal (car err) (cdr err)))
-    (file-error (latex-to-svg-backend--warn-once "recording cache use" err))))
+    (file-error
+     (latex-to-svg-backend--warn-once "recording cache use" err 'buffer))))
 
 ;;;; Scale
 
@@ -717,7 +744,7 @@ should defer to display time rather than size against a guess."
                              latex-to-svg-backend--image-cache))
                 (file-missing
                  (latex-to-svg-backend--warn-once
-                  "cache entry collected while rendering" err)))))))))
+                  "cache entry collected while rendering" err 'buffer)))))))))
 
 ;;;; Placeholder
 
@@ -1398,7 +1425,8 @@ equation per session."
         ;; Not repairable by recompiling -- and the deletions that a repair
         ;; would attempt are exactly what is failing here.  Report it.
         (file-error
-         (latex-to-svg-backend--warn-once "reading compile metadata" err))))))
+         (latex-to-svg-backend--warn-once
+          "reading compile metadata" err 'buffer))))))
 
 ;;;; Cache maintenance (garbage collection)
 

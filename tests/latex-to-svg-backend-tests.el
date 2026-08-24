@@ -422,6 +422,41 @@
       ;; Returns nil, so it can tail a recovery handler.
       (should-not (latex-to-svg-backend--warn-once "touching" '(file-error "Other"))))))
 
+(ert-deftest latex-to-svg-backend-warn-once-buffer-scope-repeats-per-document ()
+  ;; A persistent problem should be re-reported for each document opened -- a
+  ;; single warning is easily missed in a server that runs for weeks -- while
+  ;; equations within one buffer still share one warning.
+  (let ((warnings 0))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (&rest _) (cl-incf warnings))))
+      (clrhash latex-to-svg-backend--warned)
+      (with-temp-buffer
+        (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope") 'buffer)
+        (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope") 'buffer)
+        (should (= 1 warnings))
+        ;; The mark is the buffer's own, so renaming it is not a new document.
+        (rename-buffer "renamed.org")
+        (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope") 'buffer)
+        (should (= 1 warnings))
+        ;; A different condition in the same buffer is its own diagnosis.
+        (latex-to-svg-backend--warn-once "touching" '(file-error "Other") 'buffer)
+        (should (= 2 warnings)))
+      ;; Another document: told again -- even one named identically, since the
+      ;; mark died with the previous buffer rather than lingering under its name.
+      (with-temp-buffer
+        (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope") 'buffer)
+        (should (= 3 warnings)))
+      ;; Session scope ignores the buffer entirely: sentinel and idle-timer
+      ;; sites must not multiply per document.
+      (with-temp-buffer
+        (latex-to-svg-backend--warn-once "writing" '(permission-denied "Nope"))
+        (should (= 4 warnings)))
+      (with-temp-buffer
+        (latex-to-svg-backend--warn-once "writing" '(permission-denied "Nope"))
+        (should (= 4 warnings)))
+      ;; And a buffer-scoped mark does not leak into the session table.
+      (should (= 1 (hash-table-count latex-to-svg-backend--warned))))))
+
 (ert-deftest latex-to-svg-backend-touch-warns-once-when-refused ()
   ;; An unwritable cache entry (root-owned after a run under sudo, or a
   ;; read-only mount) must not break the display path -- the mtime is only a
