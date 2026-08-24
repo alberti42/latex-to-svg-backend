@@ -318,6 +318,28 @@ the same undisplayed SVG), which made preview sizing non-deterministic."
 (defvar latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal)
   "Format keys whose `.fmt' failed a compile; precompilation skipped for them.")
 
+;;;; Error reporting
+
+;; Conditions already reported by `latex-to-svg-backend--warn-once', keyed
+;; "CONTEXT/ERROR-SYMBOL".  An error the engine recovers from is never silent:
+;; the first of each kind warns, so a misconfiguration is diagnosable, while a
+;; recurring one does not warn once per equation.
+(defvar latex-to-svg-backend--warned (make-hash-table :test 'equal)
+  "Context/condition pairs already reported this session.")
+
+(defun latex-to-svg-backend--warn-once (context err)
+  "Report ERR under CONTEXT once per error type this session.  Return nil.
+For an error the engine recovers from: the recovery is reported rather than
+silenced, but only the first occurrence of each error type warns.  CONTEXT
+is a short phrase naming what failed, e.g. \"recording cache use\"."
+  (let ((seen (format "%s/%s" context (car err))))
+    (unless (gethash seen latex-to-svg-backend--warned)
+      (puthash seen t latex-to-svg-backend--warned)
+      (display-warning 'latex-to-svg-backend
+                       (format "%s: %s" context (error-message-string err))
+                       :warning)))
+  nil)
+
 ;;;; Colors and appearance
 
 (defun latex-to-svg-backend--color-to-hex (color fallback)
@@ -477,10 +499,19 @@ cache).  All of KEY's files — `.svg', `.eld', `.log' — live together in
 (defun latex-to-svg-backend--touch (file)
   "Bump FILE's modification time to now (a last-use hint for GC).
 `latex-to-svg-backend-gc' treats the SVG mtime as the equation's last-use
-time, so this is called whenever a cached SVG is (re)loaded.  Signals
-`file-missing' when FILE is gone; the caller treats that as a cache miss
-\(see `latex-to-svg-backend--cached-image')."
-  (set-file-times file))
+time, so this is called whenever a cached SVG is (re)loaded.
+
+Signals `file-missing' when FILE is gone -- the caller treats that as a
+cache miss (see `latex-to-svg-backend--cached-image').  Any other refusal
+by the filesystem is reported once (`latex-to-svg-backend--warn-once') and
+then tolerated: the mtime only orders GC, so an entry owned by another
+user (a cache populated once under sudo) or on a read-only mount is left
+untouched, ages out, and recompiles."
+  (condition-case err
+      (set-file-times file)
+    ;; A collected entry belongs to the caller, which turns it into a miss.
+    (file-missing (signal (car err) (cdr err)))
+    (file-error (latex-to-svg-backend--warn-once "recording cache use" err))))
 
 ;;;; Scale
 
@@ -648,7 +679,7 @@ should defer to display time rather than size against a guess."
               ;; can collect the entry between the check above and the read
               ;; below.  That is a miss -- the caller recompiles -- not an
               ;; error to raise from the display path.
-              (condition-case nil
+              (condition-case err
                   (progn
                     ;; Record the access for the LRU garbage collector.
                     (latex-to-svg-backend--touch file)
@@ -656,7 +687,9 @@ should defer to display time rather than size against a guess."
                              (latex-to-svg-backend--load-svg-image
                               file scale color background padding)
                              latex-to-svg-backend--image-cache))
-                (file-missing nil))))))))
+                (file-missing
+                 (latex-to-svg-backend--warn-once
+                  "cache entry collected while rendering" err)))))))))
 
 ;;;; Placeholder
 

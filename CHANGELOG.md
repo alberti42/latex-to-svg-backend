@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tolerates concurrent removal by contract), so the guards only hid real
   failures such as an unwritable cache directory. Those now signal.
 
+### Added
+
+- Errors the engine recovers from are now reported instead of silenced: the
+  first occurrence of each error type warns (once per site and condition per
+  session), so a misconfiguration such as an unwritable cache directory is
+  diagnosable without a warning per equation.
+
 ### Fixed
 
 - A cached equation collected by *another* session's garbage collector while
@@ -24,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   half-guarded (the mtime bump ignored every error; the read that followed
   ignored none). Both are now covered by one handler that treats a vanished
   entry as a cache miss, so the equation simply recompiles.
+- A cache entry the filesystem refuses to let us touch (root-owned after a run
+  under `sudo`, or a read-only mount) no longer breaks rendering: the mtime is
+  only a garbage-collection hint, so the refusal is reported once and the entry
+  is left to age out and recompile.
 
 ## [0.8.1] - 2026-08-14
 

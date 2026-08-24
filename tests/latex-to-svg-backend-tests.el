@@ -296,6 +296,42 @@
               (should (equal (image-property img2 :scale) 1.5)))))
       (delete-file tmp))))
 
+(ert-deftest latex-to-svg-backend-warn-once-reports-each-type-once ()
+  ;; A recovered error is reported, but only the first of each kind: one
+  ;; warning per context/condition pair, not one per equation.
+  (let ((warnings 0))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (&rest _) (cl-incf warnings))))
+      (clrhash latex-to-svg-backend--warned)
+      (latex-to-svg-backend--warn-once "touching" '(permission-denied "nope"))
+      (latex-to-svg-backend--warn-once "touching" '(permission-denied "nope"))
+      (should (= 1 warnings))
+      ;; A different condition in the same context is its own diagnosis.
+      (latex-to-svg-backend--warn-once "touching" '(file-error "other"))
+      (should (= 2 warnings))
+      ;; So is the same condition somewhere else.
+      (latex-to-svg-backend--warn-once "writing" '(permission-denied "nope"))
+      (should (= 3 warnings))
+      ;; Returns nil, so it can tail a recovery handler.
+      (should-not (latex-to-svg-backend--warn-once "touching" '(file-error "x"))))))
+
+(ert-deftest latex-to-svg-backend-touch-warns-once-when-refused ()
+  ;; An unwritable cache entry (root-owned after a run under sudo, or a
+  ;; read-only mount) must not break the display path -- the mtime is only a
+  ;; GC hint -- but it is reported once, never silently dropped.
+  (let ((warnings 0))
+    (cl-letf (((symbol-function 'set-file-times)
+               (lambda (&rest _)
+                 (signal 'permission-denied
+                         (list "Setting file times" "Permission denied"
+                               "/cache/ab/cdef.svg"))))
+              ((symbol-function 'display-warning)
+               (lambda (&rest _) (cl-incf warnings))))
+      (clrhash latex-to-svg-backend--warned)
+      (should-not (latex-to-svg-backend--touch "/cache/ab/cdef.svg"))
+      (should-not (latex-to-svg-backend--touch "/cache/ab/cdef.svg"))
+      (should (= 1 warnings)))))
+
 (ert-deftest latex-to-svg-backend-touch-signals-when-file-vanished ()
   ;; `--touch' does not swallow errors: a collected entry signals
   ;; `file-missing', which the caller turns into a cache miss (next test).
