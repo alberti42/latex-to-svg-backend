@@ -7,32 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-08-24
+
 ### Changed
 
+- A recovered error is now reported once per *buffer* at the sites the display
+  path reaches (color resolution, font measurement, the cache-use hint, the
+  collected-entry race, the metadata read), rather than once per Emacs process.
+  A server runs for weeks, so a single warning per process is easily missed or
+  long stale, while one per opened document stays bounded -- equations within a
+  buffer still share one warning. The mark is buffer-local, so it is discarded
+  with the buffer, a rename cannot re-arm it, and nothing accumulates in a
+  long-lived process. Sites reached from a process sentinel or the idle GC
+  timer stay session-scoped: the buffer current there is unrelated to the
+  equation, so marking it would misattribute the diagnosis.
+- Errors the engine recovers from are now reported instead of silenced: the
+  first occurrence of each kind warns (once per site and condition per
+  session), so a misconfiguration is diagnosable without one warning per
+  equation. No `ignore-errors` remains in the engine -- every site either lets
+  the error signal, or names the specific conditions it recovers from and
+  reports them.
 - Cache and temporary-file cleanup no longer wraps deletions in
-  `ignore-errors`. The race those guards existed for -- another session
-  sharing the cache directory removing an entry first -- is already handled by
-  the primitives (`delete-file` ignores `ENOENT`; recursive `delete-directory`
+  `ignore-errors`. The race those guards existed for -- another session sharing
+  the cache directory removing an entry first -- is already handled by the
+  primitives (`delete-file` ignores `ENOENT`; recursive `delete-directory`
   tolerates concurrent removal by contract), so the guards only hid real
   failures such as an unwritable cache directory. Those now signal.
-
-### Added
-
-- Errors the engine recovers from are now reported instead of silenced: the
-  first occurrence of each error type warns (once per site and condition per
-  session), so a misconfiguration such as an unwritable cache directory is
-  diagnosable without a warning per equation.
-- A `.eld` metadata sidecar or GC timestamp that cannot be written or read
-  back (unwritable cache directory, a file truncated by a crash mid-write) is
-  now reported once instead of silently yielding no metadata. An unusable GC
-  timestamp is also validated as a number, not just as readable syntax.
-- An unreadable metadata sidecar is now repaired instead of costing the
-  equation its metadata for good: only a compile can rewrite the sidecar, and
-  the cached SVG meant no compile ever happened, so the whole cache entry is
-  discarded and the next render rebuilds both (once per equation per session).
+- A cache entry the filesystem refuses to let us touch (root-owned after a run
+  under `sudo`, or a read-only mount) is now reported once. The mtime is only a
+  garbage-collection hint, so the entry is still left to age out and recompile.
 - A display that cannot resolve colors at all, and a frame whose default font
   cannot be measured, are now reported once each instead of silently falling
-  back to the default color / deferring the equation's size forever.
+  back to the default color / leaving the equation unsized.
+- A `.eld` metadata sidecar or GC timestamp that cannot be written or read back
+  (unwritable cache directory, a file truncated by a crash mid-write) is now
+  reported once. An unusable GC timestamp is also validated as a number, not
+  merely as readable syntax -- one that parsed to a non-number used to signal
+  later, from the idle timer.
 - A LaTeX toolchain program that cannot be *started* during preamble
   precompilation -- `kpsewhich` or the LaTeX binary moved by a TeX Live upgrade
   mid-session, after the toolchain check passed -- is now reported once instead
@@ -41,21 +52,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A cached equation collected by *another* session's garbage collector while
-  it was being displayed no longer signals `file-missing` out of the display
-  path. The shared cache directory makes that window real, and it was only
-  half-guarded (the mtime bump ignored every error; the read that followed
-  ignored none). Both are now covered by one handler that treats a vanished
+- A cached equation collected by *another* session's garbage collector while it
+  was being displayed no longer signals `file-missing` out of the display path.
+  The shared cache directory makes that window real, and it was only
+  half-guarded: the mtime bump ignored every error, but the read that followed
+  ignored none. Both are now covered by one handler that treats a vanished
   entry as a cache miss, so the equation simply recompiles.
 - A preamble that fails to dump to a `.fmt` is no longer retried for every
   equation. The failure blocklisted nothing, so each equation paid for another
   synchronous `latex -ini` run that could not succeed; it is now abandoned for
   the session (with one warning) and the engine falls back to full compiles --
   the behaviour a dump that fails *after* succeeding already had.
-- A cache entry the filesystem refuses to let us touch (root-owned after a run
-  under `sudo`, or a read-only mount) no longer breaks rendering: the mtime is
-  only a garbage-collection hint, so the refusal is reported once and the entry
-  is left to age out and recompile.
+- An unreadable metadata sidecar no longer costs the equation its metadata for
+  good. Only a compile writes the sidecar, and the cached SVG meant no compile
+  ever happened; the entry is now discarded so the next render rebuilds both
+  the SVG and the sidecar (at most once per equation per session).
 
 ## [0.8.1] - 2026-08-14
 
@@ -208,7 +219,8 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
-[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.6.1...v0.7.0
