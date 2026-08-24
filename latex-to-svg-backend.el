@@ -774,10 +774,10 @@ and runs `latex-to-svg-backend-latex-program' in `-ini' mode with
                               (concat "-jobname=" fkey)
                               (concat "&" (latex-to-svg-backend--latex-format-name))
                               "mylatexformat.ltx" pre-tex))))
-      (ignore-errors (delete-file pre-tex))
+      (delete-file pre-tex)
       (if (and (eql rv 0) (file-exists-p fmt))
-          (progn (ignore-errors (delete-file log)) fmt)
-        (ignore-errors (delete-file fmt))
+          (progn (delete-file log) fmt)
+        (delete-file fmt)
         nil))))
 
 (defun latex-to-svg-backend--ensure-format ()
@@ -807,7 +807,7 @@ blocklisted after an earlier failure."
             fmt)
            ;; Missing or stale -> (re)build, if mylatexformat is available.
            ((latex-to-svg-backend--precompile-available-p)
-            (when (file-exists-p fmt) (ignore-errors (delete-file fmt)))
+            (delete-file fmt)
             (when-let* ((built (latex-to-svg-backend--build-format fkey)))
               (puthash fkey t latex-to-svg-backend--format-checked)
               built))))))))
@@ -822,7 +822,7 @@ equation is not mistaken for a broken format."
   (let ((fkey (file-name-base format-file)))
     (puthash fkey t latex-to-svg-backend--format-blocklist)
     (remhash fkey latex-to-svg-backend--format-checked)
-    (ignore-errors (delete-file format-file))
+    (delete-file format-file)
     (display-warning
      'latex-to-svg-backend
      "Precompiled LaTeX preamble failed; falling back to full compiles."
@@ -1031,7 +1031,7 @@ re-tints from cache without recompiling."
          (dvi (expand-file-name "equation.dvi" dir))
          (svg (latex-to-svg-backend--svg-file key))
          (format-file (and (not no-format) (latex-to-svg-backend--ensure-format)))
-         (cleanup (lambda () (ignore-errors (delete-directory dir t))))
+         (cleanup (lambda () (delete-directory dir t)))
          (output-buffer (generate-new-buffer
                          (format " *latex-to-svg-backend-%s*" key))))
     (with-temp-file tex
@@ -1254,7 +1254,7 @@ rarely needed."
   (let ((dir (expand-file-name "fmt" (latex-to-svg-backend--cache-dir))))
     (when (file-directory-p dir)
       (dolist (f (directory-files dir t "\\.fmt\\'"))
-        (ignore-errors (delete-file f))))))
+        (delete-file f)))))
 
 ;;;###autoload
 (defun latex-to-svg-backend-metadata (latex)
@@ -1283,7 +1283,10 @@ corrupt or half-written sidecar also yields nil)."
       (let ((f (concat base ext)))
         (when (file-exists-p f)
           (cl-incf freed (or (file-attribute-size (file-attributes f)) 0))
-          (ignore-errors (delete-file f)))))
+          ;; No guard needed: `delete-file' ignores ENOENT, so another session
+          ;; collecting the same shared cache entry first is not an error --
+          ;; while a real one (unwritable cache) still signals.
+          (delete-file f))))
     freed))
 
 (defun latex-to-svg-backend--gc-stamp-file ()
@@ -1351,7 +1354,7 @@ next use — a blunt companion to `latex-to-svg-backend-gc' and
   (interactive)
   (let ((svg-dir (expand-file-name "svg" (latex-to-svg-backend--cache-dir))))
     (when (file-directory-p svg-dir)
-      (ignore-errors (delete-directory svg-dir t))))
+      (delete-directory svg-dir t)))
   (clrhash latex-to-svg-backend--image-cache))
 
 (defvar latex-to-svg-backend--gc-timer nil

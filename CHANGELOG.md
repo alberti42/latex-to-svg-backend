@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Cache and temporary-file cleanup no longer wraps deletions in
+  `ignore-errors`. The race those guards existed for -- another session
+  sharing the cache directory removing an entry first -- is already handled by
+  the primitives (`delete-file` ignores `ENOENT`; recursive `delete-directory`
+  tolerates concurrent removal by contract), so the guards only hid real
+  failures such as an unwritable cache directory. Those now signal.
+
 ## [0.8.1] - 2026-08-14
 
 ### Fixed
@@ -156,6 +167,7 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.1...HEAD
 [0.8.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.6.1...v0.7.0
