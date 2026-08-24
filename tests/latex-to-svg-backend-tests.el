@@ -422,6 +422,40 @@
       ;; Returns nil, so it can tail a recovery handler.
       (should-not (latex-to-svg-backend--warn-once "touching" '(file-error "Other"))))))
 
+(ert-deftest latex-to-svg-backend-warn-once-rearms-when-stale ()
+  ;; A warning from weeks ago says nothing about whether the problem is still
+  ;; there, so a mark goes stale after the interval -- in both scopes.  Time is
+  ;; stubbed rather than waited for.
+  (let ((warnings 0)
+        (now 1000000.0))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (&rest _) (cl-incf warnings)))
+              ((symbol-function 'float-time) (lambda (&rest _) now)))
+      (clrhash latex-to-svg-backend--warned)
+      ;; Session scope: reported once, then quiet.
+      (latex-to-svg-backend--warn-once "writing" '(permission-denied "Nope"))
+      (latex-to-svg-backend--warn-once "writing" '(permission-denied "Nope"))
+      (should (= 1 warnings))
+      ;; Exactly at the interval is still quiet.
+      (setq now (+ now latex-to-svg-backend--warn-interval))
+      (latex-to-svg-backend--warn-once "writing" '(permission-denied "Nope"))
+      (should (= 1 warnings))
+      ;; Past it: the problem is still there, so say so again.
+      (setq now (+ now 1))
+      (latex-to-svg-backend--warn-once "writing" '(permission-denied "Nope"))
+      (should (= 2 warnings))
+      ;; ... and only once more, until it goes stale again.
+      (latex-to-svg-backend--warn-once "writing" '(permission-denied "Nope"))
+      (should (= 2 warnings))
+      ;; Buffer scope ages the same way, for a document left open for days.
+      (with-temp-buffer
+        (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope") 'buffer)
+        (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope") 'buffer)
+        (should (= 3 warnings))
+        (setq now (+ now latex-to-svg-backend--warn-interval 1))
+        (latex-to-svg-backend--warn-once "touching" '(permission-denied "Nope") 'buffer)
+        (should (= 4 warnings))))))
+
 (ert-deftest latex-to-svg-backend-warn-once-buffer-scope-repeats-per-document ()
   ;; A persistent problem should be re-reported for each document opened -- a
   ;; single warning is easily missed in a server that runs for weeks -- while

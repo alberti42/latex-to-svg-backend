@@ -328,17 +328,27 @@ the same undisplayed SVG), which made preview sizing non-deterministic."
 ;;;; Error reporting
 
 ;; Conditions already reported by `latex-to-svg-backend--warn-once', keyed
-;; "CONTEXT/ERROR-SYMBOL".  An error the engine recovers from is never silent:
-;; the first of each kind warns, so a misconfiguration is diagnosable, while a
-;; recurring one does not warn once per equation.
+;; "CONTEXT/ERROR-SYMBOL" and valued with the time they were reported.  An
+;; error the engine recovers from is never silent: the first of each kind
+;; warns, so a misconfiguration is diagnosable, while a recurring one does not
+;; warn once per equation.
 (defvar latex-to-svg-backend--warned (make-hash-table :test 'equal)
-  "Context/condition pairs already reported this session.")
+  "Context/condition pairs already reported this session, and when.")
 
 ;; Buffer-scoped marks live with the buffer, so they are discarded when it is
 ;; killed and never accumulate for a long-lived process, a rename cannot re-arm
 ;; them, and a reopened document is genuinely a new one.
 (defvar-local latex-to-svg-backend--warned-in-buffer nil
-  "Context/condition pairs already reported in this buffer.")
+  "Alist of context/condition pairs already reported in this buffer, and when.")
+
+(defconst latex-to-svg-backend--warn-interval 86400
+  "Seconds before the same condition is reported again at the same site.
+A warning from three weeks ago says nothing about whether the problem is
+still there, so a mark goes stale instead of lasting for the life of the
+buffer or the process.  A day is long enough that a persistent failure
+costs one line in `*Warnings*' per day, and lines up with the default
+`latex-to-svg-backend-gc-interval', so a cache directory the collector
+cannot write reports once per collection attempt.")
 
 (defun latex-to-svg-backend--warn-once (context err &optional scope)
   "Report ERR under CONTEXT once, and return nil.
@@ -358,16 +368,24 @@ warning.
 Callers reached from a process sentinel or an idle timer must leave SCOPE
 nil: the buffer current there is unrelated to the equation (our own process
 output buffer, or whatever the timer interrupted), so marking it would both
-misattribute the diagnosis and warn far too often."
+misattribute the diagnosis and warn far too often.
+
+Either way a mark goes stale after `latex-to-svg-backend--warn-interval',
+so a condition that is still occurring is reported again rather than
+resting on a warning from weeks ago."
   (let* ((seen (format "%s/%s" context (car err)))
-         (fresh (if (eq scope 'buffer)
-                    (unless (member seen latex-to-svg-backend--warned-in-buffer)
-                      (push seen latex-to-svg-backend--warned-in-buffer)
-                      t)
-                  (unless (gethash seen latex-to-svg-backend--warned)
-                    (puthash seen t latex-to-svg-backend--warned)
-                    t))))
+         (now (float-time))
+         (last (if (eq scope 'buffer)
+                   (cdr (assoc seen latex-to-svg-backend--warned-in-buffer))
+                 (gethash seen latex-to-svg-backend--warned)))
+         (fresh (or (null last)
+                    (> (- now last) latex-to-svg-backend--warn-interval))))
     (when fresh
+      (if (eq scope 'buffer)
+          (setf (alist-get seen latex-to-svg-backend--warned-in-buffer
+                           nil nil #'equal)
+                now)
+        (puthash seen now latex-to-svg-backend--warned))
       (display-warning 'latex-to-svg-backend
                        (format "%s: %s" context (error-message-string err))
                        :warning)))

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A reported condition is now re-reported if it is still occurring a day later,
+  instead of resting on a warning from weeks ago. Each mark records when it
+  warned and goes stale after 24 hours, in both scopes: a cache directory the
+  garbage collector cannot write reports once per collection attempt rather than
+  once per process, and a document left open for days is told again. The cap is
+  still per site and per condition, so a persistent failure costs one line in
+  `*Warnings*` per day, never one per equation.
+
 ## [0.8.2] - 2026-08-24
 
 ### Changed
