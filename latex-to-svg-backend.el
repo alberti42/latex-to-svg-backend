@@ -318,6 +318,13 @@ the same undisplayed SVG), which made preview sizing non-deterministic."
 (defvar latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal)
   "Format keys whose `.fmt' failed a compile; precompilation skipped for them.")
 
+;; Content keys whose unreadable `.eld' sidecar has been discarded this
+;; session, so the repair is attempted at most once per equation: a sidecar
+;; that comes back unreadable after a fresh compile would otherwise recompile
+;; on every query.
+(defvar latex-to-svg-backend--metadata-repaired (make-hash-table :test 'equal)
+  "Content keys whose unreadable metadata sidecar was discarded this session.")
+
 ;;;; Error reporting
 
 ;; Conditions already reported by `latex-to-svg-backend--warn-once', keyed
@@ -1365,17 +1372,32 @@ Returns the plist `(:nums (INITIAL . FINAL))' read from LATEX's
 `.eld' sidecar: INITIAL is the caller's `:metadata' at render time and
 FINAL is the first integer the compile emitted on a
 `latex-to-svg-backend-metadata-prefix' line.  Available on cache hit or miss
-once LATEX has compiled at least once with the prefix set; nil otherwise (a
-corrupt or half-written sidecar also yields nil)."
-  (let ((file (latex-to-svg-backend--meta-file (latex-to-svg-backend--cache-key latex))))
+once LATEX has compiled at least once with the prefix set; nil otherwise.
+
+A sidecar that cannot be parsed (truncated by a crash mid-write) also
+yields nil, but it is not left to rot: only a compile can rewrite it, and
+the cached SVG would keep any compile from happening, so LATEX's whole
+cache entry is discarded (`latex-to-svg-backend-invalidate') and the next
+render rebuilds both the SVG and the sidecar.  Done at most once per
+equation per session."
+  (let* ((key (latex-to-svg-backend--cache-key latex))
+         (file (latex-to-svg-backend--meta-file key)))
     (when (file-readable-p file)
       (condition-case err
           (with-temp-buffer
             (insert-file-contents file)
             (read (current-buffer)))
-        ;; A sidecar truncated by a crash mid-write, or collected by another
-        ;; session between the check and the read: no metadata, reported once.
-        ((end-of-file invalid-read-syntax file-error)
+        ;; Unreadable syntax: repairable, by making the entry compile again.
+        ((end-of-file invalid-read-syntax)
+         (latex-to-svg-backend--warn-once
+          "discarding an unreadable metadata sidecar" err)
+         (unless (gethash key latex-to-svg-backend--metadata-repaired)
+           (puthash key t latex-to-svg-backend--metadata-repaired)
+           (latex-to-svg-backend-invalidate latex))
+         nil)
+        ;; Not repairable by recompiling -- and the deletions that a repair
+        ;; would attempt are exactly what is failing here.  Report it.
+        (file-error
          (latex-to-svg-backend--warn-once "reading compile metadata" err))))))
 
 ;;;; Cache maintenance (garbage collection)

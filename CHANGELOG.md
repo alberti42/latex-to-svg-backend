@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back (unwritable cache directory, a file truncated by a crash mid-write) is
   now reported once instead of silently yielding no metadata. An unusable GC
   timestamp is also validated as a number, not just as readable syntax.
+- An unreadable metadata sidecar is now repaired instead of costing the
+  equation its metadata for good: only a compile can rewrite the sidecar, and
+  the cached SVG meant no compile ever happened, so the whole cache entry is
+  discarded and the next render rebuilds both (once per equation per session).
 - A display that cannot resolve colors at all, and a frame whose default font
   cannot be measured, are now reported once each instead of silently falling
   back to the default color / deferring the equation's size forever.

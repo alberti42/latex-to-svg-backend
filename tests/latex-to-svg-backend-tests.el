@@ -1007,6 +1007,44 @@ kept for symmetry with the compile pipeline."
           (should (= 1 warnings)))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
+(ert-deftest latex-to-svg-backend-unreadable-sidecar-regenerates-the-entry ()
+  ;; Only a compile can rewrite a metadata sidecar, and a cached SVG means no
+  ;; compile ever happens -- so an unreadable sidecar would cost the equation
+  ;; its metadata permanently.  Discard the entry instead: the next render
+  ;; rebuilds both.
+  (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-meta-fix" t))
+        (warnings 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest _) (cl-incf warnings))))
+          (clrhash latex-to-svg-backend--warned)
+          (clrhash latex-to-svg-backend--metadata-repaired)
+          (clrhash latex-to-svg-backend--image-cache)
+          (let* ((latex "$x$")
+                 (key (latex-to-svg-backend--cache-key latex))
+                 (svg (latex-to-svg-backend--svg-file key))
+                 (meta (latex-to-svg-backend--meta-file key)))
+            ;; A cached SVG, a warm image, and a sidecar truncated mid-write.
+            (with-temp-file svg (insert "<svg/>"))
+            (with-temp-file meta (insert "(:nums (3 . "))
+            (puthash (concat key "@0.8@#000000@nil@nil") 'IMG
+                     latex-to-svg-backend--image-cache)
+            (should-not (latex-to-svg-backend-metadata latex))
+            (should (= 1 warnings))
+            ;; Entry gone: SVG, sidecar, and the warm image.
+            (should-not (file-exists-p meta))
+            (should-not (file-exists-p svg))
+            (should (= 0 (hash-table-count latex-to-svg-backend--image-cache)))
+            ;; At most one repair per equation: if a freshly written sidecar
+            ;; came back unreadable too, this must not recompile on every
+            ;; query.  Reported already, so the count stays at one.
+            (with-temp-file svg (insert "<svg/>"))
+            (with-temp-file meta (insert "(:nums (3 . "))
+            (should-not (latex-to-svg-backend-metadata latex))
+            (should (file-exists-p svg))
+            (should (= 1 warnings))))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
+
 (ert-deftest latex-to-svg-backend-write-metadata-failure-lets-the-equation-through ()
   ;; --write-metadata runs in the compile sentinel, before the pending
   ;; callbacks fire: a sidecar it cannot write must be reported, not signalled,
