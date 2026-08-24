@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tolerates concurrent removal by contract), so the guards only hid real
   failures such as an unwritable cache directory. Those now signal.
 
+### Fixed
+
+- A cached equation collected by *another* session's garbage collector while
+  it was being displayed no longer signals `file-missing` out of the display
+  path. The shared cache directory makes that window real, and it was only
+  half-guarded (the mtime bump ignored every error; the read that followed
+  ignored none). Both are now covered by one handler that treats a vanished
+  entry as a cache miss, so the equation simply recompiles.
+
 ## [0.8.1] - 2026-08-14
 
 ### Fixed

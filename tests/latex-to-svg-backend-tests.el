@@ -296,6 +296,37 @@
               (should (equal (image-property img2 :scale) 1.5)))))
       (delete-file tmp))))
 
+(ert-deftest latex-to-svg-backend-touch-signals-when-file-vanished ()
+  ;; `--touch' does not swallow errors: a collected entry signals
+  ;; `file-missing', which the caller turns into a cache miss (next test).
+  (let ((gone (make-temp-file "l2s-gone" nil ".svg")))
+    (delete-file gone)
+    (should-error (latex-to-svg-backend--touch gone) :type 'file-missing)))
+
+(ert-deftest latex-to-svg-backend-cached-image-nil-when-entry-collected ()
+  ;; The on-disk cache is shared across sessions, so another Emacs's GC can
+  ;; remove the entry between the `file-exists-p' check and the read.  The
+  ;; display path treats that as a miss (the caller recompiles) instead of
+  ;; signalling; nothing is cached.
+  (let ((tmp (make-temp-file "l2s-svg" nil ".svg")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp
+            (insert "<svg xmlns='http://www.w3.org/2000/svg' "
+                    "width='10pt' height='10pt'>"
+                    "<rect width='10' height='10'/></svg>"))
+          (clrhash latex-to-svg-backend--image-cache)
+          (cl-letf (((symbol-function 'latex-to-svg-backend--svg-file)
+                     (lambda (_key) tmp))
+                    ((symbol-function 'latex-to-svg-backend-display-scale)
+                     (lambda (&rest _) 0.8))
+                    ;; Collect the entry inside the window.
+                    ((symbol-function 'latex-to-svg-backend--touch)
+                     (lambda (file) (delete-file file))))
+            (should-not (latex-to-svg-backend--cached-image "K"))
+            (should (= 0 (hash-table-count latex-to-svg-backend--image-cache)))))
+      (when (file-exists-p tmp) (delete-file tmp)))))
+
 ;;;; Public entry point
 
 (ert-deftest latex-to-svg-backend-returns-nil-when-not-renderable ()

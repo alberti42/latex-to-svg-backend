@@ -475,11 +475,12 @@ cache).  All of KEY's files — `.svg', `.eld', `.log' — live together in
                     (latex-to-svg-backend--shard-dir key)))
 
 (defun latex-to-svg-backend--touch (file)
-  "Bump FILE's modification time to now, best-effort (a last-use hint for GC).
+  "Bump FILE's modification time to now (a last-use hint for GC).
 `latex-to-svg-backend-gc' treats the SVG mtime as the equation's last-use
-time, so this is called whenever a cached SVG is (re)loaded.  Any error is
-ignored: the mtime is only a hint."
-  (ignore-errors (set-file-times file)))
+time, so this is called whenever a cached SVG is (re)loaded.  Signals
+`file-missing' when FILE is gone; the caller treats that as a cache miss
+\(see `latex-to-svg-backend--cached-image')."
+  (set-file-times file))
 
 ;;;; Scale
 
@@ -643,12 +644,19 @@ should defer to display time rather than size against a guess."
       (or (gethash image-key latex-to-svg-backend--image-cache)
           (let ((file (latex-to-svg-backend--svg-file key)))
             (when (file-exists-p file)
-              ;; Record the access for the LRU garbage collector.
-              (latex-to-svg-backend--touch file)
-              (puthash image-key
-                       (latex-to-svg-backend--load-svg-image
-                        file scale color background padding)
-                       latex-to-svg-backend--image-cache)))))))
+              ;; The cache is shared across sessions, so another session's GC
+              ;; can collect the entry between the check above and the read
+              ;; below.  That is a miss -- the caller recompiles -- not an
+              ;; error to raise from the display path.
+              (condition-case nil
+                  (progn
+                    ;; Record the access for the LRU garbage collector.
+                    (latex-to-svg-backend--touch file)
+                    (puthash image-key
+                             (latex-to-svg-backend--load-svg-image
+                              file scale color background padding)
+                             latex-to-svg-backend--image-cache))
+                (file-missing nil))))))))
 
 ;;;; Placeholder
 
