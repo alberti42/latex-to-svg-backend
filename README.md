@@ -1,14 +1,14 @@
 # latex-to-svg-backend
 
-A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering engine behind [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) preview stack for Org and Markdown. A front-end does its own equation *detection* and image *placement*; the typesetting, caching and sizing happen here.
+A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering engine behind [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) preview stack for Org and Markdown. A front-end does its own equation *detection* and image *placement*; the typesetting, caching and sizing is done by the banckend.
 
-Used by [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) (Org/Markdown math preview) and [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) (math in `agent-shell` output) — see [Related packages](#related-packages).
+Used by [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) (Org/Markdown math preview) and [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) (math in `agent-shell` output); see [Related packages](#related-packages).
 
 ## Why
 
 Equations are compiled once and then recolored and rescaled **without recompiling** — the two things that are expensive if you bake color/size into the render:
 
-- **Content-addressed on disk.** Each unique equation (SHA-1 of LaTeX + preamble + style) compiles at most once, ever; the cache is shared across every front-end and buffer.
+- **Each equation compiles once.** The cache file is named after the equation itself (the SHA-1 of the LaTeX, the preamble and the style), so identical input always finds its own file and the cache is shared across every front-end and buffer.
 - **Color-independent SVG.** `dvisvgm --currentcolor` emits the default ink as the literal token `currentColor`, substituted with the buffer foreground at display time. A theme switch re-tints from cache — no recompile. The image background is transparent, so it always matches the buffer.
 - **Size-independent SVG.** Compiled at `dvisvgm --scale=1` (natural point dimensions, glyphs as outline paths) and scaled at display time via `create-image`'s `:scale`, computed from the buffer font height so equations track the font — again no recompile.
 - **In-memory image cache.** On top of the on-disk SVG cache, each ready-to-display image (the SVG already tinted and scaled for the current buffer) is memoized for the session, keyed by content + color + scale. Re-showing an equation you've already displayed — revisiting a buffer, scrolling back, a redisplay — is then an instant hash lookup, with no disk read and no recompile. Sizes and colors coexist as separate entries, so a font or theme change just adds one.
@@ -20,7 +20,7 @@ Equations are compiled once and then recolored and rescaled **without recompilin
 - [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) — previews LaTeX math in **Org and Markdown** buffers (and other markups) as SVG. A shared front-end core (`latex-to-svg-frontend`) plus thin per-mode adaptors detect math with a blank-line-bounded scanner and overlay each occurrence with an SVG typeset here; because the engine renders its input verbatim, sizing follows from the delimiters. A drop-in replacement for built-in `org-latex-preview` that adds recolor-on-theme-switch and rescale-on-zoom straight from cache.
 - [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) — renders LaTeX math in [`agent-shell`](https://github.com/xenodium/agent-shell)'s streamed markdown output. Display and inline math in an agent's response are shown as theme-matched SVGs while the original LaTeX stays in the buffer, so copy and save round-trip renderable source. It uses this library for the typesetting.
 
-Because the on-disk cache is content-addressed, an equation that appears in both an Org buffer and an agent's chat compiles only once, shared across both.
+Because the cache is named after the equation's content, an equation that appears in both an Org buffer and an agent's chat compiles only once, shared across both.
 
 Several other Emacs packages preview LaTeX for the user; a few do, under the hood, the same string-to-image step this library does. How they relate:
 
@@ -42,7 +42,7 @@ What sets this stack apart is that it pulls together strengths that used to live
 - **Numbered equations + working `\ref` / `\eqref`** — the AUCTeX-based packages get these by compiling a whole `.tex`; here the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end assigns each block's numbers (folded in as a `\setcounter`) and reads the true counter back through the engine's compile-metadata sidecar, so every fragment still compiles alone.
 - **Recolour + rescale from cache** — a theme switch, or a font/zoom change, updates previews with no LaTeX run; the others bake the colour and size into the image and must re-run LaTeX.
 - **Fast builds** — `.fmt` preamble precompilation (see [Preamble precompilation](#preamble-precompilation-fmt)).
-- **A shared, bare-string cache** — content-addressed and shared across front-ends and sessions, and the renderer takes a bare string, so it works outside a `.tex` document (for example, math in an agent's chat output).
+- **A shared, bare-string cache** — keyed by the equation's content and shared across front-ends and sessions, and the renderer takes a bare string, so it works outside a `.tex` document (for example, math in an agent's chat output).
 
 The last two fall out of compiling each equation on its own and naming it by content.
 

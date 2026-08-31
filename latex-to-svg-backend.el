@@ -35,9 +35,9 @@
 ;; Design (why it is cheap to recolor and rescale):
 ;;
 ;;   * Equations are compiled with `latex' + `dvisvgm' to a standalone SVG,
-;;     content-addressed on disk (SHA-1 of LaTeX + preamble + style).  Each
-;;     unique equation therefore compiles at most once, ever, and the cache
-;;     is shared across every front-end.
+;;     named on disk after its own content (SHA-1 of LaTeX + preamble +
+;;     style).  Each unique equation therefore compiles at most once, and
+;;     the cache is shared across every front-end.
 ;;
 ;;   * The on-disk SVG is COLOR-INDEPENDENT: dvisvgm `--currentcolor' emits
 ;;     the default ink as the literal token `currentColor', which is
@@ -188,8 +188,8 @@ and rebuilt automatically (the binary is newer than the `.fmt');
   "Directory for cached equation SVGs and scratch compiles.
 When nil, `$XDG_CACHE_HOME/emacs/latex-to-svg/' (or
 `~/.cache/emacs/latex-to-svg/') is used, so equation SVGs persist across
-sessions and each unique equation compiles at most once ever.  Because the
-cache is content-addressed and color/size-independent, it is safe to share
+sessions and each unique equation compiles at most once.  Because the
+cache is keyed by content and is color/size-independent, it is safe to share
 across every front-end and buffer."
   :type '(choice (const :tag "Default XDG cache" nil) directory)
   :group 'latex-to-svg-backend)
@@ -199,7 +199,7 @@ across every front-end and buffer."
 The garbage collector (`latex-to-svg-backend-gc') treats each SVG's
 modification time as its last-use time (bumped on every load), so this
 expires equations that have not been viewed within the given window.
-Because the cache is content-addressed and color/size-independent, an
+Because the cache is keyed by content and is color/size-independent, an
 expired equation simply recompiles the next time it is needed."
   :type '(choice (const :tag "No age limit" nil) (integer :tag "Days"))
   :group 'latex-to-svg-backend)
@@ -1368,7 +1368,7 @@ the buffer font at build time, so call within the target buffer."
 (defun latex-to-svg-backend-invalidate (latex)
   "Forget any cached render of LATEX and force a recompile next time.
 
-Deletes LATEX's on-disk SVG (content-addressed) and drops every
+Deletes LATEX's on-disk SVG (named after LATEX's content) and drops every
 in-memory image built from it (all sizes / colors), so a subsequent
 `latex-to-svg-backend' for LATEX recompiles from scratch.  Use this to recover
 from a stale or corrupt cached SVG — ordinarily the content hash makes

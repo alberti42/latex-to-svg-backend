@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine with caching") instead of naming an implementation property
   ("content-addressed"), which read as jargon in the MELPA listing and did not
   convey that the package renders math at all.
+- "Content-addressed" is gone from the user-facing documentation, replaced by
+  what it actually means: the cache file is named after the equation's own
+  content. The property is unchanged; only the wording was opaque.
 - The Commentary and README now introduce the library as the current engine
   behind `agent-shell-math-renderer` and the `latex-to-svg` preview stack,
   rather than as code extracted from the former. The extraction is history
