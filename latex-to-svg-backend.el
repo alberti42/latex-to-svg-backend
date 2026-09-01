@@ -1,4 +1,4 @@
-;;; latex-to-svg-backend.el --- Content-addressed LaTeX-to-SVG image rendering -*- lexical-binding: t -*-
+;;; latex-to-svg-backend.el --- LaTeX-to-SVG rendering engine with caching -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 Andrea Alberti
 
@@ -27,10 +27,10 @@
 ;;
 ;; A small, buffer-agnostic engine that turns a LaTeX math string into an
 ;; SVG image suitable for overlaying in an Emacs buffer.  It is the
-;; rendering core extracted from `agent-shell-math-renderer'; front-ends
-;; (agent-shell's markdown renderer, an Org preview mode, ...) do their own
-;; equation detection and image *placement* and delegate the actual
-;; typesetting here.
+;; rendering engine behind `agent-shell-math-renderer' (math in agent-shell's
+;; chat output) and the `latex-to-svg' preview stack (Org and Markdown).
+;; A front-end finds the equations and places the images; the typesetting,
+;; caching and sizing happen here.
 ;;
 ;; Design (why it is cheap to recolor and rescale):
 ;;

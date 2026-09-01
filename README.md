@@ -1,6 +1,6 @@
 # latex-to-svg-backend
 
-A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering core extracted from [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer); front-ends do their own equation *detection* and image *placement* and delegate the typesetting here.
+A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering engine behind [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) preview stack for Org and Markdown. A front-end does its own equation *detection* and image *placement*; the typesetting, caching and sizing happen here.
 
 Used by [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) (Org/Markdown math preview) and [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) (math in `agent-shell` output) — see [Related packages](#related-packages).
 
@@ -18,7 +18,7 @@ Equations are compiled once and then recolored and rescaled **without recompilin
 `latex-to-svg-backend` is a library, not a preview command: it turns one LaTeX string into one image and leaves *finding* equations and *placing* images to a front-end. Two front-ends are built on it today:
 
 - [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) — previews LaTeX math in **Org and Markdown** buffers (and other markups) as SVG. A shared front-end core (`latex-to-svg-frontend`) plus thin per-mode adaptors detect math with a blank-line-bounded scanner and overlay each occurrence with an SVG typeset here; because the engine renders its input verbatim, sizing follows from the delimiters. A drop-in replacement for built-in `org-latex-preview` that adds recolor-on-theme-switch and rescale-on-zoom straight from cache.
-- [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) — renders LaTeX math in [`agent-shell`](https://github.com/xenodium/agent-shell)'s streamed markdown output. Display and inline math in an agent's response are shown as theme-matched SVGs while the original LaTeX stays in the buffer, so copy and save round-trip renderable source. This library was extracted from it.
+- [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) — renders LaTeX math in [`agent-shell`](https://github.com/xenodium/agent-shell)'s streamed markdown output. Display and inline math in an agent's response are shown as theme-matched SVGs while the original LaTeX stays in the buffer, so copy and save round-trip renderable source. It uses this library for the typesetting.
 
 Because the on-disk cache is content-addressed, an equation that appears in both an Org buffer and an agent's chat compiles only once, shared across both.
 

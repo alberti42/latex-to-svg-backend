@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The package summary now says what the engine does ("LaTeX-to-SVG rendering
+  engine with caching") instead of naming an implementation property
+  ("content-addressed"), which read as jargon in the MELPA listing and did not
+  convey that the package renders math at all.
+- The Commentary and README now introduce the library as the current engine
+  behind `agent-shell-math-renderer` and the `latex-to-svg` preview stack,
+  rather than as code extracted from the former. The extraction is history
+  that helps nobody installing the package; knowing which front-ends use it
+  does.
 - A reported condition is now re-reported if it is still occurring a day later,
   instead of resting on a warning from weeks ago. Each mark records when it
   warned and goes stale after 24 hours, in both scopes: a cache directory the
