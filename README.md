@@ -58,7 +58,19 @@ Equation numbering used to be the gap: the AUCTeX-based packages compile a whole
 
 ## Installation
 
-The package (feature) is `latex-to-svg-backend`; the repository is **`alberti42/latex-to-svg-backend`**. It is not on MELPA yet, so install straight from the repository. This is a *library* — you normally install it as a dependency of a front-end (e.g. the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) preview stack or `agent-shell-math-renderer`), declaring it *before* the front-end.
+It is on [MELPA](https://melpa.org/#/latex-to-svg-backend):
+
+```
+M-x package-install RET latex-to-svg-backend RET
+```
+
+Usually you do not install it yourself, though. This is a *library*: a
+front-end (the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg)
+preview stack, or
+[`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer))
+names it in `Package-Requires`, so installing the front-end brings it in.
+
+To track the development version instead of the MELPA snapshot:
 
 ```elisp
 ;; use-package + :vc (Emacs 30+)
@@ -77,8 +89,9 @@ The package (feature) is `latex-to-svg-backend`; the repository is **`alberti42/
 (package-vc-install "https://github.com/alberti42/latex-to-svg-backend")
 ```
 
-Note the recipe *name* stays `latex-to-svg-backend` (the feature you `require`), while
-`:repo` is `alberti42/latex-to-svg-backend`.
+The package (feature) is `latex-to-svg-backend`, and so is the recipe *name*
+(the feature you `require`); the repository is
+**`alberti42/latex-to-svg-backend`**.
 
 ## API
 
