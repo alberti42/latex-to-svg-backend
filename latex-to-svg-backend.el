@@ -6,7 +6,7 @@
 ;; Maintainer: Andrea Alberti <a.alberti82@gmail.com>
 ;; Assisted-by: Claude:claude-opus-4-8
 ;; URL: https://github.com/alberti42/latex-to-svg-backend
-;; Version: 0.8.3
+;; Version: 0.9.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tex, math, images
 

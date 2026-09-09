@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-09
+
+### Added
+
+- `:padding` now accepts per-side values, so a box can have a left gutter (or
+  any other asymmetric inset) instead of the same inset on all four sides:
+  pass a list of one to four numbers read in CSS order — `(ALL)`,
+  `(VERTICAL HORIZONTAL)`, `(TOP HORIZONTAL BOTTOM)`,
+  `(TOP RIGHT BOTTOM LEFT)`. A left-only gutter is `'(0 0 0 6)`. Each
+  dimension of the SVG viewport grows by the sum of its two sides and the
+  origin shifts by the left/top ones, so the ink stays put relative to the
+  sides that were not padded. Still display-time only — same on-disk SVG, no
+  recompile — and still its own image-cache dimension, so paddings that differ
+  only in which side they grow coexist.
+
+### Added
+
+- `:safe` predicates on the options that carry inert data, so a project can
+  set them in a `-*-` line or `.dir-locals.el` without the "risky local
+  variable" prompt: `-line-width`, `-cache-max-age`, `-gc-interval` and
+  `-metadata-prefix` join the booleans and numbers that already had one.
+  `-line-width` is interpolated verbatim into the preamble, so its predicate
+  admits only a bare signed decimal plus a TeX unit (`345pt`, `12.5cm`) — no
+  brace, backslash or space can reach `\def\sa@width{...}`.
+- The five options that must never come from a file stay unsafe, and a test
+  now pins that: `-latex-program` and `-dvisvgm-program` (executed),
+  `-preamble` and `-appended-preamble` (LaTeX code that gets compiled), and
+  `-cache-directory` (written to, and where the collector deletes).
+
+### Fixed
+
+- The equation `.tex` (and the precompiled preamble `.tex`) are now written as
+  UTF-8 explicitly, instead of with whatever the user's default coding system
+  happens to be. Math carrying a character that default cannot encode — an
+  `α` under a Latin-1 language environment, say — sent `write-region` through
+  the interactive coding-system selection, which *prompts*: fatal in a
+  background compile, and no `.tex` was written at all. LaTeX has read UTF-8
+  by default since its 2018-04-01 release, so pinning the encoding on write is
+  what makes the input encoding correct; no `inputenc` line is needed (and
+  adding one would rehash `--cache-key` and the `.fmt` key, discarding every
+  cached SVG and format for every user, to declare what is already true).
+
+### Changed
+
+- A plain number keeps its old meaning (all four sides), so existing callers
+  are unaffected. A malformed spec (wrong length, a non-number, a negative
+  side) now signals an error instead of being ignored: quietly dropping the
+  padding would draw a box that merely looks wrong. Padding is normalized
+  before it is keyed, so `6` and `(6 6 6 6)` name one cache entry, not two.
+
 ## [0.8.3] - 2026-09-01
 
 ### Changed
@@ -243,7 +293,8 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
-[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.0...v0.8.1
