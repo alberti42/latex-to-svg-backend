@@ -1545,6 +1545,32 @@ Return the SVG path."
           (should (= 0 (hash-table-count latex-to-svg-backend--image-cache))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
+(ert-deftest latex-to-svg-backend-safe-locals-exclude-the-dangerous-ones ()
+  ;; A `:safe' defcustom is applied from a file's `-*-' line or a
+  ;; `.dir-locals.el' with no prompt, so opening someone else's file applies
+  ;; it.  These five decide what is executed, what LaTeX code is compiled,
+  ;; and which directory the collector deletes files in -- they must never be
+  ;; marked safe, whatever else is.
+  (dolist (v '(latex-to-svg-backend-latex-program
+               latex-to-svg-backend-dvisvgm-program
+               latex-to-svg-backend-preamble
+               latex-to-svg-backend-appended-preamble
+               latex-to-svg-backend-cache-directory))
+    (should (get v 'custom-type))
+    (should-not (get v 'safe-local-variable))))
+
+(ert-deftest latex-to-svg-backend-line-width-safe-rejects-latex-code ()
+  ;; `-line-width' IS safe, but only because its predicate admits nothing but
+  ;; a bare dimension: the value is interpolated verbatim into
+  ;; `\def\sa@width{...}', so a brace or backslash would be LaTeX injection.
+  (let ((safe (get 'latex-to-svg-backend-line-width 'safe-local-variable)))
+    (should safe)
+    (dolist (ok '(nil "345pt" "12.5cm" "-3in" ".5em" "1sp"))
+      (should (funcall safe ok)))
+    (dolist (bad (list "1pt}\\input{/etc/passwd}\\def\\x{" "\\linewidth"
+                       "345 pt" "345" "pt" "345px" 345))
+      (should-not (funcall safe bad)))))
+
 (provide 'latex-to-svg-backend-tests)
 
 ;;; latex-to-svg-backend-tests.el ends here

@@ -164,6 +164,17 @@ would wrap).  Unnumbered content is unaffected (cropped to its ink).
 The value is folded into the cache key, so changing it re-renders."
   :type '(choice (const :tag "Class default (~345pt)" nil)
                  (string :tag "LaTeX dimension"))
+  ;; This string is interpolated verbatim into the preamble
+  ;; (`\def\sa@width{...}'), so a file-local value is LaTeX code unless it is
+  ;; validated.  Accept only a bare signed decimal plus a TeX unit: no brace,
+  ;; backslash or space can get through, so nothing can escape the `\def'.
+  :safe (lambda (v)
+          (or (null v)
+              (and (stringp v)
+                   (string-match-p
+                    (concat "\\`[+-]?\\(?:[0-9]+\\(?:\\.[0-9]*\\)?\\|\\.[0-9]+\\)"
+                            "\\(?:pt\\|pc\\|in\\|bp\\|cm\\|mm\\|dd\\|cc\\|sp\\|ex\\|em\\)\\'")
+                    v))))
   :group 'latex-to-svg-backend)
 
 (defcustom latex-to-svg-backend-precompile t
@@ -204,6 +215,9 @@ expires equations that have not been viewed within the given window.
 Because the cache is keyed by content and is color/size-independent, an
 expired equation simply recompiles the next time it is needed."
   :type '(choice (const :tag "No age limit" nil) (integer :tag "Days"))
+  ;; Bounded blast radius: it only decides when the collector drops entries
+  ;; from our own cache directory, and a dropped equation is recompiled.
+  :safe (lambda (v) (or (null v) (integerp v)))
   :group 'latex-to-svg-backend)
 
 (defcustom latex-to-svg-backend-gc-interval 1
@@ -214,6 +228,7 @@ sessions share the cache (and still collects a long-lived daemon daily).
 Set to nil to turn off automatic GC entirely; `latex-to-svg-backend-gc'
 can always be invoked by hand."
   :type '(choice (const :tag "Disabled" nil) (number :tag "Days"))
+  :safe (lambda (v) (or (null v) (numberp v)))
   :group 'latex-to-svg-backend)
 
 (defcustom latex-to-svg-backend-metadata-prefix nil
@@ -229,6 +244,9 @@ Elisp), and only FINAL — the thing the compile computes — travels through
 LaTeX, emitted with `\\typeout{PREFIX \\arabic{COUNTER}}'.  Keep that line
 short: TeX wraps log lines near column 80."
   :type '(choice (const :tag "Disabled" nil) string)
+  ;; Inert: only ever matched against compile-log lines
+  ;; (`string-prefix-p'), never written into the document.
+  :safe (lambda (v) (or (null v) (stringp v)))
   :group 'latex-to-svg-backend)
 
 (defcustom latex-to-svg-backend-font-scale 1.0
