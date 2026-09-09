@@ -238,6 +238,30 @@
                          "#eeeeee")))
       (delete-file tmp))))
 
+(ert-deftest latex-to-svg-backend-pad-box-normalizes-css-order ()
+  ;; A number pads all four sides; a list of 1-4 numbers is read in CSS
+  ;; order, so a left-only gutter is expressible.  All-zero and nil mean
+  ;; "nothing to pad" (nil), and the function is idempotent on its output
+  ;; so one spec can be normalized at the key and again at the geometry.
+  (should (equal (latex-to-svg-backend--pad-box 3) '(3 3 3 3)))
+  (should (equal (latex-to-svg-backend--pad-box '(3)) '(3 3 3 3)))
+  (should (equal (latex-to-svg-backend--pad-box '(1 2)) '(1 2 1 2)))
+  (should (equal (latex-to-svg-backend--pad-box '(1 2 3)) '(1 2 3 2)))
+  (should (equal (latex-to-svg-backend--pad-box '(1 2 3 4)) '(1 2 3 4)))
+  (should (equal (latex-to-svg-backend--pad-box '(0 0 0 6)) '(0 0 0 6)))
+  (should-not (latex-to-svg-backend--pad-box nil))
+  (should-not (latex-to-svg-backend--pad-box 0))
+  (should-not (latex-to-svg-backend--pad-box '(0 0 0 0)))
+  (should (equal (latex-to-svg-backend--pad-box
+                  (latex-to-svg-backend--pad-box '(1 2)))
+                 '(1 2 1 2)))
+  ;; A malformed spec is a caller bug: signal rather than silently drop the
+  ;; padding and draw a box that merely looks wrong.
+  (should-error (latex-to-svg-backend--pad-box '(1 2 3 4 5)))
+  (should-error (latex-to-svg-backend--pad-box '(1 "2")))
+  (should-error (latex-to-svg-backend--pad-box "3"))
+  (should-error (latex-to-svg-backend--pad-box '(0 0 0 -6))))
+
 (ert-deftest latex-to-svg-backend-pad-svg-grows-viewport-and-boxes ()
   ;; Padding grows the root <svg> width/height/viewBox by 2*PAD and, with a
   ;; background, injects a filled <rect> covering the padded viewport behind
@@ -260,11 +284,46 @@
     (should-not (string-match-p "<rect" (latex-to-svg-backend--pad-svg svg 3 nil)))
     (should (equal (latex-to-svg-backend--pad-svg svg 0 "#eee") svg))))
 
+(ert-deftest latex-to-svg-backend-pad-svg-pads-each-side-separately ()
+  ;; Per-side padding: each dimension grows by the sum of its two sides and
+  ;; the origin shifts by the left/top ones only -- so (0 0 0 6) is a left
+  ;; gutter, with the ink left where it was relative to the right edge.
+  (let* ((svg (concat "<svg version='1.1' xmlns='http://www.w3.org/2000/svg' "
+                      "width='36pt' height='14pt' "
+                      "viewBox='-69 -70 36 14'>"
+                      "<path fill='#000' d='M0 0h1v1z'/></svg>"))
+         (out (latex-to-svg-backend--pad-svg svg '(1 2 3 4) "#eeeeee")))
+    ;; width += left+right = 6, height += top+bottom = 4.
+    (should (string-match-p "width='42pt'" out))
+    (should (string-match-p "height='18pt'" out))
+    ;; Origin shifts by -left / -top only.
+    (should (string-match-p "viewBox='-73 -71 42 18'" out))
+    (should (string-match-p
+             "<rect x='-73' y='-71' width='42' height='18' fill='#eeeeee'/>" out))
+    ;; A left-only gutter grows the width and moves the origin left; the
+    ;; height and the vertical origin are untouched.
+    (let ((left (latex-to-svg-backend--pad-svg svg '(0 0 0 6) nil)))
+      (should (string-match-p "width='42pt'" left))
+      (should (string-match-p "height='14pt'" left))
+      (should (string-match-p "viewBox='-75 -70 42 14'" left)))))
+
 (ert-deftest latex-to-svg-backend-image-cache-key-includes-padding ()
   ;; Padding is its own cache dimension, so a padded box coexists with an
-  ;; unpadded one of the same equation / size / colors.
+  ;; unpadded one of the same equation / size / colors -- and two paddings
+  ;; that differ only in which side they grow are distinct entries.
   (should-not (equal (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff" "#eee")
-                     (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff" "#eee" 3))))
+                     (latex-to-svg-backend--image-cache-key "K" 0.8 "#fff" "#eee" 3)))
+  (should-not (equal (latex-to-svg-backend--image-cache-key
+                      "K" 0.8 "#fff" "#eee" '(0 0 0 6))
+                     (latex-to-svg-backend--image-cache-key
+                      "K" 0.8 "#fff" "#eee" '(6 0 0 0))))
+  ;; Normalized first (as `--cached-image' does), a number and its four-side
+  ;; spelling are one entry, not two.
+  (should (equal (latex-to-svg-backend--image-cache-key
+                  "K" 0.8 "#fff" "#eee" (latex-to-svg-backend--pad-box 6))
+                 (latex-to-svg-backend--image-cache-key
+                  "K" 0.8 "#fff" "#eee"
+                  (latex-to-svg-backend--pad-box '(6 6 6 6))))))
 
 (ert-deftest latex-to-svg-backend-image-cache-coexists-per-scale ()
   ;; The same on-disk SVG cached at two display scales yields two distinct

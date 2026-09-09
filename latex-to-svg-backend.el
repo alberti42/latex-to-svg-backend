@@ -81,8 +81,10 @@
 ;;
 ;; The optional `:color'/`:background'/`:padding' keys override the
 ;; display-time tint, an optional box color behind the equation, and padding
-;; that grows that box beyond the ink (all apply post-compile, no recompile);
-;; a front-end owns the user-facing preference and passes it through.
+;; that grows that box beyond the ink -- one number for all four sides, or a
+;; list of one to four numbers in CSS order, so a left-only gutter is
+;; (0 0 0 6) (all apply post-compile, no recompile); a front-end owns the
+;; user-facing preference and passes it through.
 ;;
 ;; Helpers a front-end typically needs for its refresh policy:
 ;; `latex-to-svg-backend-available-p', `latex-to-svg-backend-appearance',
@@ -627,16 +629,54 @@ independent, so it can be compiled now and sized later with no recompile."
 
 ;;;; Image build
 
+(defun latex-to-svg-backend--pad-box (padding)
+  "Normalize PADDING to a (TOP RIGHT BOTTOM LEFT) list of pt, or nil.
+PADDING is either a number -- the same padding on all four sides -- or a
+list of one to four numbers read in CSS order: (ALL), (VERTICAL
+HORIZONTAL), (TOP HORIZONTAL BOTTOM), (TOP RIGHT BOTTOM LEFT).  So
+\(0 0 0 6) is a left gutter and nothing else.
+
+Returns nil when there is nothing to pad (PADDING nil, or every side 0),
+so a caller can test the result directly, and is idempotent on its own
+output, so one value can be normalized where the cache key is built and
+again where the geometry is applied.  Signals an error for any other
+shape: a malformed spec is a caller bug, and quietly dropping the
+padding would draw a box that merely looks wrong."
+  (let ((box (cond
+              ((null padding) nil)
+              ((numberp padding) (list padding padding padding padding))
+              ((and (consp padding) (seq-every-p #'numberp padding))
+               (pcase padding
+                 (`(,all) (list all all all all))
+                 (`(,vertical ,horizontal)
+                  (list vertical horizontal vertical horizontal))
+                 (`(,top ,horizontal ,bottom)
+                  (list top horizontal bottom horizontal))
+                 (`(,top ,right ,bottom ,left)
+                  (list top right bottom left)))))))
+    (unless (or box (null padding))
+      (error "Invalid padding %S: want a number or a list of 1-4 numbers"
+             padding))
+    (when (seq-some (lambda (side) (< side 0)) box)
+      (error "Invalid padding %S: a side cannot be negative" padding))
+    ;; All-zero is "no padding": let the caller skip the whole rewrite (and
+    ;; keep `create-image' compositing the background instead of a `<rect>').
+    (unless (seq-every-p #'zerop box) box)))
+
 (defun latex-to-svg-backend--pad-svg (data pad background)
-  "Expand DATA's SVG viewport by PAD on all sides; fill BACKGROUND behind.
-PAD is a number in the SVG's own units (pt, at dvisvgm `--scale=1'),
-so it scales with the equation when the image is displayed.  The root
-`<svg>' `width'/`height'/`viewBox' are grown by 2*PAD and, when
-BACKGROUND (a color string) is non-nil, a filled `<rect>' covering the
-padded viewport is inserted behind the content so the box color extends
-PAD beyond the ink.  Returns DATA unchanged if the root tag can't be
-parsed (defensive: never break rendering over a padding request)."
-  (if-let* (((> pad 0))
+  "Expand DATA's SVG viewport by PAD on each side; fill BACKGROUND behind.
+PAD is a padding spec as accepted by `latex-to-svg-backend--pad-box' (a
+number for all four sides, or a list of one to four numbers in CSS
+order), in the SVG's own units (pt, at dvisvgm `--scale=1'), so it
+scales with the equation when the image is displayed.  The root `<svg>'
+`width'/`height'/`viewBox' grow by the horizontal and the vertical sides
+and the origin shifts by the left/top sides; when BACKGROUND (a color
+string) is non-nil, a filled `<rect>' covering the padded viewport is
+inserted behind the content so the box color extends the padding beyond
+the ink.  Returns DATA unchanged if there is nothing to pad, or if the
+root tag can't be parsed (defensive: never break rendering over a
+padding request)."
+  (if-let* ((box (latex-to-svg-backend--pad-box pad))
             ((string-match "<svg\\b[^>]*>" data))
             (beg (match-beginning 0))
             (end (match-end 0))
@@ -653,19 +693,20 @@ parsed (defensive: never break rendering over a padding request)."
             (vy (string-to-number (match-string 2 tag)))
             (vw (string-to-number (match-string 3 tag)))
             (vh (string-to-number (match-string 4 tag))))
-      (let* ((nx (- vx pad)) (ny (- vy pad))
-             (nw (+ vw (* 2 pad))) (nh (+ vh (* 2 pad)))
-             (new-tag tag)
-             (rect (if background
-                       (format "<rect x='%s' y='%s' width='%s' height='%s' fill='%s'/>"
-                               nx ny nw nh background)
-                     "")))
+      (pcase-let* ((`(,top ,right ,bottom ,left) box)
+                   (nx (- vx left)) (ny (- vy top))
+                   (nw (+ vw left right)) (nh (+ vh top bottom))
+                   (new-tag tag)
+                   (rect (if background
+                             (format "<rect x='%s' y='%s' width='%s' height='%s' fill='%s'/>"
+                                     nx ny nw nh background)
+                           "")))
         (setq new-tag (replace-regexp-in-string
                        "\\bwidth='[0-9.eE+-]+pt'"
-                       (format "width='%spt'" (+ w (* 2 pad))) new-tag nil t)
+                       (format "width='%spt'" (+ w left right)) new-tag nil t)
               new-tag (replace-regexp-in-string
                        "\\bheight='[0-9.eE+-]+pt'"
-                       (format "height='%spt'" (+ h (* 2 pad))) new-tag nil t)
+                       (format "height='%spt'" (+ h top bottom)) new-tag nil t)
               new-tag (replace-regexp-in-string
                        "\\bviewBox='[^']*'"
                        (format "viewBox='%s %s %s %s'" nx ny nw nh) new-tag nil t))
@@ -683,16 +724,17 @@ surrounding text, and centred vertically for inline display.
 
 The SVG is transparent; BACKGROUND, when non-nil (a color string),
 is painted behind it without recompiling.  Nil (the default) keeps
-the equation transparent so it blends into the buffer.  PADDING, a
-number of pt > 0, grows the SVG viewport on all sides (via
-`latex-to-svg-backend--pad-svg'), so the BACKGROUND box extends PADDING
-beyond the ink; it scales with the equation.  With PADDING the box is
-baked into the SVG (a `<rect>'); without it BACKGROUND is applied as
-`create-image' `:background'."
+the equation transparent so it blends into the buffer.  PADDING grows
+the SVG viewport (via `latex-to-svg-backend--pad-svg'), so the
+BACKGROUND box extends beyond the ink; it is a number of pt for all
+four sides or a list of one to four numbers in CSS order (see
+`latex-to-svg-backend--pad-box'), and it scales with the equation.
+With PADDING the box is baked into the SVG (a `<rect>'); without it
+BACKGROUND is applied as `create-image' `:background'."
   (let ((data (with-temp-buffer
                 (insert-file-contents file)
                 (buffer-string)))
-        (pad (and padding (> padding 0) padding)))
+        (pad (latex-to-svg-backend--pad-box padding)))
     (when color
       (setq data (replace-regexp-in-string "currentColor" color data t t)))
     (when pad
@@ -706,6 +748,8 @@ baked into the SVG (a `<rect>'); without it BACKGROUND is applied as
 
 (defun latex-to-svg-backend--image-cache-key (key scale color &optional background padding)
   "Return the image-cache key for KEY at SCALE, COLOR, BACKGROUND, PADDING.
+PADDING should be normalized (`latex-to-svg-backend--pad-box') before it
+is keyed on, so that 6 and (6 6 6 6) name one entry rather than two.
 KEY names the font- and color-independent on-disk SVG; the cached
 image object bakes in a display `:scale', a tint COLOR, an optional
 BACKGROUND box, and its PADDING, so the in-memory key adds all four.
@@ -743,6 +787,10 @@ should defer to display time rather than size against a guess."
            ;; if unresolvable (a valid CSS name / hex passes through).
            (background (and background
                             (latex-to-svg-backend--color-to-hex background background)))
+           ;; Normalize the padding spec once: the cache key is built from it
+           ;; too, and 6 and (6 6 6 6) are the same box -- they must not
+           ;; occupy two entries.
+           (padding (latex-to-svg-backend--pad-box padding))
            (image-key (latex-to-svg-backend--image-cache-key
                        key scale color background padding)))
       (or (gethash image-key latex-to-svg-backend--image-cache)
@@ -1297,9 +1345,12 @@ or any name `color-name-to-rgb' understands); nil (the default) tints
 to the buffer foreground (`latex-to-svg-backend-foreground-color'), which
 tracks the theme.  BACKGROUND paints a box color behind the otherwise
 transparent equation (a color string); nil (the default) keeps it
-transparent so it blends into the buffer.  PADDING (a number of pt >
-0) grows that box beyond the ink on all sides (it scales with the
-equation); nil / 0 (the default) crops the box to the ink.  All apply
+transparent so it blends into the buffer.  PADDING grows that box
+beyond the ink (it scales with the equation): a number of pt applies to
+all four sides, and a list of one to four numbers is read in CSS order
+-- (ALL), (VERTICAL HORIZONTAL), (TOP HORIZONTAL BOTTOM), (TOP RIGHT
+BOTTOM LEFT) -- so (0 0 0 6) is a left gutter and nothing else.  Nil
+/ 0 (the default) crops the box to the ink.  All apply
 at display time only -- same on-disk SVG, no recompile -- and fold
 into the in-memory image cache key, so tinted / boxed / padded
 variants coexist.  The engine has no tint policy of its own beyond
