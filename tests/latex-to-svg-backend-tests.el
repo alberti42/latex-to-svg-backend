@@ -652,6 +652,23 @@
 
 ;;;; Direct process pipeline
 
+(defun latex-to-svg-backend-tests--tex-source (file)
+  "Return FILE's contents, bypassing Emacs's `.tex' coding detection.
+`insert-file-contents' on a `.tex' path runs
+`latexenc-find-file-coding-system' (`file-coding-system-alist'), which
+signals `(wrong-type-argument stringp nil)' for a file carrying neither
+`inputenc' nor a TeX-master: it reaches its master-file branch and calls
+`decode-coding-string' on a nil file name.  That is an Emacs bug, not
+ours -- `emacs -Q' on any such file reproduces it -- and our sources are
+exactly that shape (the preamble has no `inputenc', and a `%&'-loaded
+source has no preamble at all).  Binding the coding system skips the
+detection.  The library never reads a `.tex' back, so only tests are
+affected."
+  (with-temp-buffer
+    (let ((coding-system-for-read 'utf-8))
+      (insert-file-contents file))
+    (buffer-string)))
+
 (defun latex-to-svg-backend-tests--finish-fake-process
     (process exit-status &optional output status event)
   "Finish fake PROCESS with EXIT-STATUS, optionally appending OUTPUT.
@@ -920,9 +937,7 @@ completion event."
                (first-scratch (aref first-process 4))
                (first-tex (car (last (plist-get first-plist :command))))
                (first-source
-                (with-temp-buffer
-                  (insert-file-contents first-tex)
-                  (buffer-string))))
+                (latex-to-svg-backend-tests--tex-source first-tex)))
           (should (string-prefix-p "%& " first-source))
           (latex-to-svg-backend-tests--finish-fake-process
            first-process 1 "format compile failed\n")
@@ -941,9 +956,7 @@ completion event."
                  (retry-scratch (aref retry-process 4))
                  (retry-tex (car (last (plist-get retry-plist :command))))
                  (retry-source
-                  (with-temp-buffer
-                    (insert-file-contents retry-tex)
-                    (buffer-string)))
+                  (latex-to-svg-backend-tests--tex-source retry-tex))
                  (dvi (expand-file-name "equation.dvi" retry-scratch))
                  (tex-log (expand-file-name "equation.log" retry-scratch))
                  (svg (latex-to-svg-backend--svg-file key)))
@@ -1544,6 +1557,39 @@ Return the SVG path."
           (should (file-exists-p fmt))
           (should (= 0 (hash-table-count latex-to-svg-backend--image-cache))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
+
+(ert-deftest latex-to-svg-backend-writes-the-tex-as-utf-8 ()
+  ;; The equation source is written as UTF-8, pinned, whatever the user's
+  ;; default coding system is.  Unpinned, a character that default cannot
+  ;; encode (an alpha under a Latin-1 language environment) sends
+  ;; `write-region' through `select-safe-coding-system-function', which
+  ;; *prompts* -- fatal in a background compile, and no `.tex' is written at
+  ;; all.  Pinning means that function is never consulted, which is the
+  ;; invariant asserted here (a prompt cannot be asserted on directly
+  ;; without a language-environment switch, and a regression must fail the
+  ;; suite rather than hang it).  This is also why the preamble needs no
+  ;; `inputenc' line: LaTeX reads UTF-8 by default and the engine writes it.
+  (latex-to-svg-backend-tests--with-fake-processes
+    (let* ((coding-system-for-write nil)
+           (select-safe-coding-system-function
+            (lambda (&rest _)
+              (error "coding system not pinned: the write would have prompted")))
+           (doc "$\\alpha = \u03b1$")
+           (key (latex-to-svg-backend--cache-key doc)))
+      (puthash key (list #'ignore) latex-to-svg-backend--pending)
+      (latex-to-svg-backend--compile key doc)
+      (let* ((tex (car (last (plist-get (aref (car l2s-test-processes) 3)
+                                        :command))))
+             (bytes (with-temp-buffer
+                      (set-buffer-multibyte nil)
+                      (insert-file-contents-literally tex)
+                      (buffer-string))))
+        ;; U+03B1 as UTF-8 is CE B1, not a locale-dependent single byte.
+        (should (string-match-p "\316\261" bytes))
+        (should (equal (latex-to-svg-backend-tests--tex-source tex)
+                       (concat (latex-to-svg-backend--preamble) "\n"
+                               "\\begin{document}\n" doc "\n"
+                               "\\end{document}\n")))))))
 
 (ert-deftest latex-to-svg-backend-safe-locals-exclude-the-dangerous-ones ()
   ;; A `:safe' defcustom is applied from a file's `-*-' line or a

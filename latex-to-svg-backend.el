@@ -957,8 +957,11 @@ program that cannot be started at all is reported once instead."
          (log (concat base ".log"))
          (buffer (get-buffer-create "*latex-to-svg-backend-precompile*")))
     (with-current-buffer buffer (erase-buffer))
-    (with-temp-file pre-tex
-      (insert (latex-to-svg-backend--preamble) "\n\\endofdump\n"))
+    ;; Pin UTF-8: see `latex-to-svg-backend--compile' on why the encoding is
+    ;; fixed on write rather than declared with `inputenc'.
+    (let ((coding-system-for-write 'utf-8-unix))
+      (with-temp-file pre-tex
+        (insert (latex-to-svg-backend--preamble) "\n\\endofdump\n")))
     (message "latex-to-svg-backend: precompiling LaTeX preamble...")
     (let ((rv (condition-case err
                   (call-process latex-to-svg-backend-latex-program nil buffer nil
@@ -1253,25 +1256,37 @@ re-tints from cache without recompiling."
          (cleanup (lambda () (delete-directory dir t)))
          (output-buffer (generate-new-buffer
                          (format " *latex-to-svg-backend-%s*" key))))
-    (with-temp-file tex
-      (if format-file
-          ;; Load the precompiled preamble: the `%&' line must be first, and
-          ;; names the format file by absolute path without its `.fmt'
-          ;; extension.  The class + packages are already in the format, so
-          ;; only the document body is compiled here.
-          (insert "%& " (file-name-sans-extension format-file) "\n"
+    ;; Pin UTF-8 on write.  LaTeX has read UTF-8 by default since its
+    ;; 2018-04-01 release, so the encoding belongs here and not in an
+    ;; `inputenc' line: adding a package to the preamble would rehash
+    ;; `--cache-key' and the `.fmt' key, discarding every cached SVG and
+    ;; format for every user, to declare what the engine already writes.
+    ;; Unpinned, an equation carrying a character the user's default coding
+    ;; system cannot encode (an alpha under a Latin-1 language environment,
+    ;; say) makes `write-region' *prompt* -- fatal in a background compile,
+    ;; and no `.tex' is written at all.  Same hazard the log copy guards
+    ;; (`--compile-failed'), but this file carries the user's own math.
+    (let ((coding-system-for-write 'utf-8-unix))
+      (with-temp-file tex
+        (if format-file
+            ;; Load the precompiled preamble: the `%&' line must be first,
+            ;; and names the format file by absolute path without its
+            ;; `.fmt' extension.  The class + packages are already in the
+            ;; format, so only the document body is compiled here.
+            (insert "%& " (file-name-sans-extension format-file) "\n"
+                    "\\begin{document}\n"
+                    latex "\n"
+                    "\\end{document}\n")
+          (insert (latex-to-svg-backend--preamble) "\n"
                   "\\begin{document}\n"
+                  ;; LATEX is inserted verbatim: it already carries its own
+                  ;; math delimiters / environment (chosen by the
+                  ;; front-end), which also decide inline vs display
+                  ;; sizing.  No `\color' — `--currentcolor' below turns
+                  ;; the default (black) ink into the `currentColor' token,
+                  ;; tinted at display.
                   latex "\n"
-                  "\\end{document}\n")
-        (insert (latex-to-svg-backend--preamble) "\n"
-                "\\begin{document}\n"
-                ;; LATEX is inserted verbatim: it already carries its own math
-                ;; delimiters / environment (chosen by the front-end), which
-                ;; also decide inline vs display sizing.  No `\color' —
-                ;; `--currentcolor' below turns the default (black) ink into
-                ;; the `currentColor' token, tinted at display.
-                latex "\n"
-                "\\end{document}\n")))
+                  "\\end{document}\n"))))
     ;; Compile at dvisvgm scale 1: the SVG is vector (glyphs are outline
     ;; paths via --no-fonts), so the scale doesn't affect quality, and the
     ;; displayed size is set later by `latex-to-svg-backend-display-scale'.  Fixing
