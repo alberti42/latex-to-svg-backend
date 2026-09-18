@@ -1,5 +1,12 @@
 # latex-to-svg-backend
 
+![Made for GNU Emacs](https://img.shields.io/badge/Made%20for-GNU%20Emacs-7F5AB6?logo=gnuemacs&logoColor=white)
+[![MELPA](https://melpa.org/packages/latex-to-svg-backend-badge.svg)](https://melpa.org/#/latex-to-svg-backend)
+[![MELPA Stable](https://stable.melpa.org/packages/latex-to-svg-backend-badge.svg)](https://stable.melpa.org/#/latex-to-svg-backend)
+[![melpazoid](https://github.com/alberti42/latex-to-svg-backend/actions/workflows/melpazoid.yml/badge.svg)](https://github.com/alberti42/latex-to-svg-backend/actions/workflows/melpazoid.yml)
+[![CI](https://github.com/alberti42/latex-to-svg-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/alberti42/latex-to-svg-backend/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/github/license/alberti42/latex-to-svg-backend)](LICENSE)
+
 A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering engine behind [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) preview stack for Org and Markdown. A front-end does its own equation *detection* and image *placement*; the typesetting, caching and sizing is done by the banckend.
 
 Used by [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) (Org/Markdown math preview) and [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) (math in `agent-shell` output); see [Related packages](#related-packages).
