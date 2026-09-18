@@ -47,10 +47,20 @@ jobs:
           emacs -Q -batch --eval '(setq byte-compile-error-on-warn t)' \
             -f batch-byte-compile latex-to-svg-backend.el
 
+      # Docstring conventions, exiting non-zero on any finding: `checkdoc-file'
+      # only prints.  Both flags are set rather than left at their defaults,
+      # so the step reports the same thing on every Emacs: the experimental
+      # verb check defaults to t up to Emacs 30 and nil from 31.
       - name: Checkdoc
         run: |
-          emacs -Q -batch --eval \
-            '(progn (require (quote checkdoc)) (checkdoc-file "latex-to-svg-backend.el"))'
+          emacs -Q -batch --eval '(progn
+            (require (quote checkdoc))
+            (setq checkdoc-force-docstrings-flag nil)
+            (setq checkdoc-verb-check-experimental-flag nil)
+            (checkdoc-file "latex-to-svg-backend.el")
+            (if (get-buffer "*Warnings*")
+                (kill-emacs 1)
+              (message "checkdoc: clean")))'
 
       - name: ERT
         run: |
