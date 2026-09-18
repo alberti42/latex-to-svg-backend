@@ -207,6 +207,10 @@
 (ert-deftest latex-to-svg-backend-load-svg-recolors-currentcolor ()
   ;; The on-disk SVG carries `currentColor'; loading substitutes the given
   ;; foreground in, so the image is tinted without recompiling.
+  ;; `create-image' signals "Invalid image type" on an Emacs built without
+  ;; librsvg -- a minimal CI build is one, so this and the two tests below
+  ;; skip there rather than reporting the build as a failure.
+  (skip-unless (image-type-available-p 'svg))
   (let ((tmp (make-temp-file "l2s-cc" nil ".svg")))
     (unwind-protect
         (progn
@@ -223,6 +227,7 @@
 (ert-deftest latex-to-svg-backend-load-svg-paints-background ()
   ;; BACKGROUND is applied post-generation as `create-image' `:background'
   ;; (the SVG stays transparent on disk); nil leaves the image transparent.
+  (skip-unless (image-type-available-p 'svg))
   (let ((tmp (make-temp-file "l2s-bg" nil ".svg")))
     (unwind-protect
         (progn
@@ -329,6 +334,7 @@
   ;; The same on-disk SVG cached at two display scales yields two distinct
   ;; image objects that coexist: the first stays warm after the second is
   ;; created (so a sibling buffer's images survive a font change — no clear).
+  (skip-unless (image-type-available-p 'svg))
   (let ((tmp (make-temp-file "l2s-svg" nil ".svg")))
     (unwind-protect
         (progn

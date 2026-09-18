@@ -59,26 +59,25 @@ jobs:
 
   render:
     runs-on: ubuntu-latest
-    name: End-to-end against a real TeX toolchain
-    # `latex-to-svg-backend-precompiled-compile-end-to-end' is the only test
-    # that runs the real thing -- latex, dvisvgm and a `.fmt' dump -- and it
-    # skips wherever they are missing, which is every other job here.  These
-    # packages are what the default preamble and the precompilation need:
-    # standalone + varwidth + mylatexformat (latex-extra), xcolor
-    # (latex-recommended), amssymb's fonts (fonts-recommended).
+    name: Whole suite against a real Emacs and a real TeX toolchain
+    # Four tests skip in every job above.  Three build an image and so need
+    # an Emacs with librsvg, which the nix builds behind setup-emacs are
+    # not -- they are minimal by design, no image support and no window
+    # system -- so this job takes Emacs from apt instead.  The fourth,
+    # `latex-to-svg-backend-precompiled-compile-end-to-end', runs the real
+    # thing: latex, dvisvgm and a `.fmt' dump.  The TeX packages are what
+    # the default preamble and the precompilation need: standalone +
+    # varwidth + mylatexformat (latex-extra), xcolor (latex-recommended),
+    # amssymb's fonts (fonts-recommended).
     steps:
       - uses: actions/checkout@v4
 
-      - uses: purcell/setup-emacs@master
-        with:
-          version: '29.1'
-
-      - name: Install the TeX toolchain
+      - name: Install Emacs and the TeX toolchain
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            texlive-latex-base texlive-latex-recommended texlive-latex-extra \
-            texlive-fonts-recommended dvisvgm
+            emacs texlive-latex-base texlive-latex-recommended \
+            texlive-latex-extra texlive-fonts-recommended dvisvgm
 
       - name: Report versions
         run: |
@@ -86,6 +85,14 @@ jobs:
           latex --version | head -1
           dvisvgm --version
           kpsewhich mylatexformat.ltx
+
+      # The point of this job is that nothing in it skips.  An Emacs
+      # without SVG support would skip the three image tests silently, so
+      # fail here instead.
+      - name: Check that this Emacs renders SVG
+        run: |
+          emacs -Q -batch --eval \
+            '(unless (image-type-available-p (quote svg)) (error "No SVG support"))'
 
       - name: ERT
         run: |
