@@ -42,10 +42,12 @@ jobs:
       - name: Report version
         run: emacs --version | head -1
 
+      # `-L .' lets each file `require' the other two.
       - name: Byte-compile, warnings as errors
         run: |
-          emacs -Q -batch --eval '(setq byte-compile-error-on-warn t)' \
-            -f batch-byte-compile latex-to-svg-backend.el
+          emacs -Q -batch -L . --eval '(setq byte-compile-error-on-warn t)' \
+            -f batch-byte-compile latex-to-svg-backend-core.el \
+            latex-to-svg-backend-latex.el latex-to-svg-backend.el
 
       # Docstring conventions, exiting non-zero on any finding: `checkdoc-file'
       # only prints.  Both flags are set rather than left at their defaults,
@@ -57,7 +59,10 @@ jobs:
             (require (quote checkdoc))
             (setq checkdoc-force-docstrings-flag nil)
             (setq checkdoc-verb-check-experimental-flag nil)
-            (checkdoc-file "latex-to-svg-backend.el")
+            (dolist (file (quote ("latex-to-svg-backend-core.el"
+                                  "latex-to-svg-backend-latex.el"
+                                  "latex-to-svg-backend.el")))
+              (checkdoc-file file))
             (if (get-buffer "*Warnings*")
                 (kill-emacs 1)
               (message "checkdoc: clean")))'

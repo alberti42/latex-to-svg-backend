@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The library is split into three files: `latex-to-svg-backend.el` (the entry
+  points), `latex-to-svg-backend-core.el` (the parts that do not depend on how
+  an equation is typeset) and `latex-to-svg-backend-latex.el` (the LaTeX
+  renderer). Load `latex-to-svg-backend` as before; no function or option was
+  renamed.
+- The options of the LaTeX renderer (`-latex-program`, `-dvisvgm-program`,
+  `-preamble`, `-appended-preamble`, `-line-width`, `-precompile`,
+  `-metadata-prefix`) moved to a Customize subgroup,
+  `latex-to-svg-backend-latex`, inside `latex-to-svg-backend`.
+
 ## [0.9.0] - 2026-09-09
 
 ### Added
