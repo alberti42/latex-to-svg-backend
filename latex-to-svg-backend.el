@@ -58,10 +58,10 @@
 ;;
 ;;   * The preamble is PRECOMPILED once to a LaTeX format file (`.fmt') via
 ;;     the `mylatexformat' package, then loaded by every equation compile
-;;     with a `%&' first line (see `latex-to-svg-backend-precompile').  This skips
-;;     re-parsing the class and packages (amsmath, ...) on each equation, so
-;;     compiles are markedly faster.  It falls back to a full compile when
-;;     `mylatexformat' is unavailable or the dump fails.
+;;     with a `%&' first line (see `latex-to-svg-backend-precompile').  This
+;;     skips re-parsing the class and packages (amsmath, ...) on each
+;;     equation, so compiles are markedly faster.  It falls back to a full
+;;     compile when `mylatexformat' is unavailable or the dump fails.
 ;;
 ;;   * The cache is SHARDED into 256 subdirectories (by the first two hex
 ;;     characters of the content key) so no single directory accumulates
@@ -72,7 +72,8 @@
 ;;
 ;; Public entry point:
 ;;
-;;   (latex-to-svg-backend LATEX &key callback renderer color background padding font-height)
+;;   (latex-to-svg-backend LATEX &key callback metadata renderer rescale-by
+;;                         color background padding font-height)
 ;;
 ;; LATEX is placed *verbatim* in the document body, so the caller passes
 ;; valid body LaTeX and decides inline vs display by the delimiters it uses
@@ -94,7 +95,8 @@
 ;;
 ;; Helpers a front-end typically needs for its refresh policy:
 ;; `latex-to-svg-backend-available-p', `latex-to-svg-backend-appearance',
-;; `latex-to-svg-backend-display-scale', and `latex-to-svg-backend-foreground-color'.
+;; `latex-to-svg-backend-display-scale', and
+;; `latex-to-svg-backend-foreground-color'.
 
 ;;; Code:
 
