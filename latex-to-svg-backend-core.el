@@ -99,8 +99,8 @@ buffer font across themes, faces, and text scale."
 
 (defcustom latex-to-svg-backend-use-placeholder nil
   "When non-nil, draw the placeholder panel instead of typesetting LaTeX.
-Also used as the automatic fallback when the programs of
-`latex-to-svg-backend-renderer' are unavailable (see
+Also used as the automatic fallback when the programs of the renderer a
+call asks for are unavailable (see
 `latex-to-svg-backend-tools-available-p')."
   :type 'boolean
   :safe #'booleanp

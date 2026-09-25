@@ -105,17 +105,19 @@ The package (feature) is `latex-to-svg-backend`, and so is the recipe *name*
 
 ## Renderers
 
-`latex-to-svg-backend-renderer` chooses the program that typesets equations:
+The `:renderer` argument of `latex-to-svg-backend` chooses the program that typesets an equation:
 
-- **`latex`** (the default) runs `latex` and `dvisvgm`. It is full LaTeX: any package the preamble loads, any macro it defines.
+- **`latex`** (the default, also `nil`) runs `latex` and `dvisvgm`. It is full LaTeX: any package the preamble loads, any macro it defines.
 - **`ratex`** runs `render-svg` from [RaTeX](https://github.com/erweixin/RaTeX), a math renderer written in Rust that parses KaTeX's syntax. It is one program and needs no TeX installation, but it typesets only the math KaTeX supports, and it loads no packages.
 
-Both produce the same color- and size-independent SVG, cropped to the ink, so everything under [API](#api) works the same with either. The renderer is part of the cache key, so each renderer's SVGs stay cached when you switch to the other.
+Both produce the same color- and size-independent SVG, cropped to the ink, so everything under [API](#api) works the same with either. The renderer is part of the cache key, so each renderer's SVGs stay cached when a caller switches to the other.
 
-To use RaTeX, download the archive for your system from the [RaTeX releases](https://github.com/erweixin/RaTeX/releases) (`ratex-cli-<version>-<target>.tar.gz`), put its `render-svg` on `exec-path` or set `latex-to-svg-backend-ratex-program` to its path, and set:
+The renderer is chosen per call, like `:color`: a front-end owns the user's choice and passes it. The backend has no option for it. A caller that passes no `:renderer`, such as [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) today, gets the LaTeX renderer. The [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end does not offer RaTeX yet.
+
+To use RaTeX, download the archive for your system from the [RaTeX releases](https://github.com/erweixin/RaTeX/releases) (`ratex-cli-<version>-<target>.tar.gz`) and put its `render-svg` on `exec-path`, or set `latex-to-svg-backend-ratex-program` to its path. A front-end then asks for it:
 
 ```elisp
-(setq latex-to-svg-backend-renderer 'ratex)
+(latex-to-svg-backend "$x^2$" :renderer 'ratex :callback #'my-refresh)
 ```
 
 What changes with RaTeX, from RaTeX v0.1.14:
@@ -157,12 +159,14 @@ In a running Emacs, load `dev/latex-to-svg-backend-benchmark.el` and call `M-x l
 ## API
 
 ```elisp
-(latex-to-svg-backend LATEX &key callback metadata rescale-by color background padding font-height)
+(latex-to-svg-backend LATEX &key callback metadata renderer rescale-by color background padding font-height)
 ```
 
 `LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the engine is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
 
 Returns an image now when one can be produced synchronously (cache / on-disk SVG / placeholder), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile.
+
+`RENDERER` is `latex` (the default, also `nil`) or `ratex`; see [Renderers](#renderers). Any other value signals an error.
 
 `RESCALE-BY` (default `1.0`) multiplies the display size of this one call on top of `latex-to-svg-backend-font-scale`. The engine has no inline/display awareness, so a front-end that wants display equations a touch larger than inline passes, say, `:rescale-by 1.1` for display and nothing for inline. It is a display-time scale only — same on-disk SVG, no recompile — and folds into the in-memory image cache key, so both sizes coexist. `METADATA` is documented under [Compile metadata](#compile-metadata-eld-sidecar) below.
 
@@ -186,12 +190,12 @@ Helpers a front-end typically needs for its refresh policy:
 | Function | Purpose |
 | --- | --- |
 | `latex-to-svg-backend-available-p` | SVG build support + graphical (or non-graphic opt-in) |
-| `latex-to-svg-backend-tools-available-p` | the programs of `latex-to-svg-backend-renderer` on `exec-path` (`latex` + `dvisvgm`, or `render-svg`) |
+| `latex-to-svg-backend-tools-available-p` | the programs of a renderer on `exec-path`: `latex` + `dvisvgm`, or `render-svg` with the argument `ratex` |
 | `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change; takes an optional `font-height` so it matches the render |
 | `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font; takes an optional `font-height`, and returns `nil` when no height is known (defer) |
 | `latex-to-svg-backend-foreground-color` | current tint color (`#rrggbb`) |
-| `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache |
-| `latex-to-svg-backend-metadata` | read back compile metadata for a LaTeX body (see below), on cache hit or miss |
+| `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache; an optional second argument names the renderer, as for `:renderer` |
+| `latex-to-svg-backend-metadata` | read back compile metadata for a LaTeX body (see below), on cache hit or miss; an optional second argument names the renderer |
 
 ### Compile metadata (`.eld` sidecar)
 
@@ -238,21 +242,21 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 
 | Both renderers | LaTeX only | RaTeX only |
 | --- | --- | --- |
-| `-renderer` | `-latex-program` | `-ratex-program` |
-| `-cache-directory` | `-dvisvgm-program` | `-ratex-macros` |
-| `-cache-max-age` | `-preamble` | |
-| `-gc-interval` | `-appended-preamble` | |
-| `-font-scale` | `-line-width` | |
-| `-use-placeholder` | `-metadata-prefix` | |
-| `-render-on-non-graphic` | `-precompile` | |
-| `-svg-dpi` | `M-x …-flush-format` | |
-| `M-x …-gc`, `…-clear-cache`, `…-invalidate` | | |
+| `-cache-directory` | `-latex-program` | `-ratex-program` |
+| `-cache-max-age` | `-dvisvgm-program` | `-ratex-macros` |
+| `-gc-interval` | `-preamble` | |
+| `-font-scale` | `-appended-preamble` | |
+| `-use-placeholder` | `-line-width` | |
+| `-render-on-non-graphic` | `-metadata-prefix` | |
+| `-svg-dpi` | `-precompile` | |
+| `M-x …-gc`, `…-clear-cache`, `…-invalidate` | `M-x …-flush-format` | |
+
+There is no option for the renderer: the caller chooses it per call (see [Renderers](#renderers)).
 
 The functions under [API](#api) work with both; `latex-to-svg-backend-metadata` returns `nil` for an equation RaTeX rendered.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `latex-to-svg-backend-renderer` | `latex` | `latex` or `ratex` — see [Renderers](#renderers) |
 | `latex-to-svg-backend-latex-program` | `"latex"` | the `latex` binary |
 | `latex-to-svg-backend-dvisvgm-program` | `"dvisvgm"` | the `dvisvgm` binary |
 | `latex-to-svg-backend-preamble` | `standalone[varwidth]` + `amsmath`/`xcolor` | the document class and base packages |

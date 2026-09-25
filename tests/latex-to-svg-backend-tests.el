@@ -615,7 +615,8 @@
 (ert-deftest latex-to-svg-backend-returns-placeholder-without-tools ()
   ;; Renderable but no toolchain => the placeholder panel image, not nil.
   (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
-            ((symbol-function 'latex-to-svg-backend-tools-available-p) (lambda () nil))
+            ((symbol-function 'latex-to-svg-backend-tools-available-p)
+             (lambda (&optional _renderer) nil))
             ((symbol-function 'latex-to-svg-backend--placeholder)
              (lambda (_latex) 'placeholder-image)))
     (should (eq (latex-to-svg-backend "E=mc^2") 'placeholder-image))))
@@ -627,7 +628,8 @@
   (let ((latex-to-svg-backend--pending (make-hash-table :test 'equal))
         (compiles 0))
     (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
-              ((symbol-function 'latex-to-svg-backend-tools-available-p) (lambda () t))
+              ((symbol-function 'latex-to-svg-backend-tools-available-p)
+               (lambda (&optional _renderer) t))
               ((symbol-function 'latex-to-svg-backend--cached-image) (lambda (&rest _) nil))
               ((symbol-function 'latex-to-svg-backend--compile)
                (lambda (&rest _) (cl-incf compiles))))
@@ -646,7 +648,8 @@
         (compiles 0))
     (unwind-protect
         (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
-                  ((symbol-function 'latex-to-svg-backend-tools-available-p) (lambda () t))
+                  ((symbol-function 'latex-to-svg-backend-tools-available-p)
+                   (lambda (&optional _renderer) t))
                   ((symbol-function 'latex-to-svg-backend--svg-file) (lambda (_k) tmp))
                   ((symbol-function 'latex-to-svg-backend--cached-image) (lambda (&rest _) nil))
                   ((symbol-function 'latex-to-svg-backend--compile)
@@ -1608,7 +1611,6 @@ Return the SVG path."
                latex-to-svg-backend-preamble
                latex-to-svg-backend-appended-preamble
                latex-to-svg-backend-cache-directory
-               latex-to-svg-backend-renderer
                latex-to-svg-backend-ratex-program
                latex-to-svg-backend-ratex-macros))
     (should (get v 'custom-type))
@@ -1631,45 +1633,84 @@ Return the SVG path."
 (ert-deftest latex-to-svg-backend-latex-cache-key-is-unchanged ()
   ;; Adding a renderer must not re-key the LaTeX renderer's cache: every
   ;; user's warm cache would be recompiled.  This is the formula the key had
-  ;; before the renderer choice existed.
-  (let ((latex-to-svg-backend-renderer 'latex))
-    (should (equal (latex-to-svg-backend--cache-key "E=mc^2")
-                   (secure-hash 'sha1
-                                (format "%d\0%s\0%s"
-                                        latex-to-svg-backend--cache-version
-                                        "E=mc^2"
-                                        (latex-to-svg-backend--preamble)))))))
+  ;; before the renderer choice existed, with the renderer left out (as
+  ;; every existing caller does) and named.
+  (let ((key (secure-hash 'sha1
+                          (format "%d\0%s\0%s"
+                                  latex-to-svg-backend--cache-version
+                                  "E=mc^2"
+                                  (latex-to-svg-backend--preamble)))))
+    (should (equal (latex-to-svg-backend--cache-key "E=mc^2") key))
+    (should (equal (latex-to-svg-backend--cache-key "E=mc^2" 'latex) key))))
 
 (ert-deftest latex-to-svg-backend-cache-key-separates-renderers ()
   ;; The same LaTeX gets one key per renderer, the RaTeX key follows the
   ;; macros and not the LaTeX preamble.
   (let* ((latex-to-svg-backend-ratex-macros "")
-         (latex-key (let ((latex-to-svg-backend-renderer 'latex))
-                      (latex-to-svg-backend--cache-key "$x$")))
-         (latex-to-svg-backend-renderer 'ratex)
-         (ratex-key (latex-to-svg-backend--cache-key "$x$")))
+         (latex-key (latex-to-svg-backend--cache-key "$x$" 'latex))
+         (ratex-key (latex-to-svg-backend--cache-key "$x$" 'ratex)))
     (should-not (equal latex-key ratex-key))
     (let ((latex-to-svg-backend-preamble "\\documentclass{minimal}"))
-      (should (equal ratex-key (latex-to-svg-backend--cache-key "$x$"))))
+      (should (equal ratex-key (latex-to-svg-backend--cache-key "$x$" 'ratex))))
     (let ((latex-to-svg-backend-ratex-macros "\\def\\v{\\mathbf{v}}"))
-      (should-not (equal ratex-key (latex-to-svg-backend--cache-key "$x$"))))))
+      (should-not (equal ratex-key (latex-to-svg-backend--cache-key "$x$" 'ratex))))))
 
 (ert-deftest latex-to-svg-backend-unknown-renderer-signals ()
-  ;; A misspelt renderer is reported, not quietly replaced by a default.
-  (let ((latex-to-svg-backend-renderer 'mathjax))
-    (should-error (latex-to-svg-backend--cache-key "$x$") :type 'user-error)
-    (should-error (latex-to-svg-backend-tools-available-p) :type 'user-error)))
+  ;; A misspelt renderer is reported, not quietly replaced by a default, by
+  ;; every public function that takes one.
+  (should-error (latex-to-svg-backend "$x$" :renderer 'mathjax))
+  (should-error (latex-to-svg-backend-tools-available-p 'mathjax))
+  (should-error (latex-to-svg-backend-invalidate "$x$" 'mathjax))
+  (should-error (latex-to-svg-backend-metadata "$x$" 'mathjax)))
 
 (ert-deftest latex-to-svg-backend-tools-available-p-follows-renderer ()
   ;; Each renderer is available when its own programs are found.
+  ;; Nil is the LaTeX renderer.
   (let ((latex-to-svg-backend-latex-program "l2s-no-such-latex")
         (latex-to-svg-backend-ratex-program "emacs"))
-    (let ((latex-to-svg-backend-renderer 'latex))
-      (should-not (latex-to-svg-backend-tools-available-p)))
-    (let ((latex-to-svg-backend-renderer 'ratex))
-      (should (latex-to-svg-backend-tools-available-p))
-      (let ((latex-to-svg-backend-ratex-program "l2s-no-such-render-svg"))
-        (should-not (latex-to-svg-backend-tools-available-p))))))
+    (should-not (latex-to-svg-backend-tools-available-p))
+    (should-not (latex-to-svg-backend-tools-available-p 'latex))
+    (should (latex-to-svg-backend-tools-available-p 'ratex))
+    (let ((latex-to-svg-backend-ratex-program "l2s-no-such-render-svg"))
+      (should-not (latex-to-svg-backend-tools-available-p 'ratex)))))
+
+(ert-deftest latex-to-svg-backend-renderer-is-per-call ()
+  ;; `:renderer' decides both the cache key and the compile, per call: the
+  ;; same equation queued without it (the LaTeX renderer) and with `ratex'
+  ;; gets two entries and two different compiles.  `-invalidate' and
+  ;; `-metadata' name the entry of the renderer they are given.
+  (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-renderer" t))
+         (latex-to-svg-backend--pending (make-hash-table :test 'equal))
+         (latex-to-svg-backend-ratex-macros "")
+         (doc "$x$")
+         (latex-key (latex-to-svg-backend--cache-key doc 'latex))
+         (ratex-key (latex-to-svg-backend--cache-key doc 'ratex))
+         (compiled nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
+                  ((symbol-function 'latex-to-svg-backend--latex-tools-available-p)
+                   (lambda () t))
+                  ((symbol-function 'latex-to-svg-backend--ratex-tools-available-p)
+                   (lambda () t))
+                  ((symbol-function 'latex-to-svg-backend--compile)
+                   (lambda (key &rest _) (push (cons 'latex key) compiled)))
+                  ((symbol-function 'latex-to-svg-backend--ratex-compile)
+                   (lambda (key &rest _) (push (cons 'ratex key) compiled))))
+          (should-not (latex-to-svg-backend doc :callback #'ignore))
+          (should-not (latex-to-svg-backend doc :callback #'ignore :renderer 'ratex))
+          (should (equal compiled (list (cons 'ratex ratex-key)
+                                        (cons 'latex latex-key))))
+          (dolist (key (list latex-key ratex-key))
+            (with-temp-file (latex-to-svg-backend--svg-file key)
+              (insert "<svg/>")))
+          (with-temp-file (latex-to-svg-backend--meta-file latex-key)
+            (prin1 '(:nums (1 . 1)) (current-buffer)))
+          (should (equal (latex-to-svg-backend-metadata doc) '(:nums (1 . 1))))
+          (should-not (latex-to-svg-backend-metadata doc 'ratex))
+          (latex-to-svg-backend-invalidate doc 'ratex)
+          (should-not (file-exists-p (latex-to-svg-backend--svg-file ratex-key)))
+          (should (file-exists-p (latex-to-svg-backend--svg-file latex-key))))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
 
 ;;;; RaTeX renderer
 
@@ -1746,13 +1787,12 @@ Return the SVG path."
   ;; stored cropped and recolored, the callbacks run, no `.eld' is written,
   ;; and the scratch directory and process buffer are removed.
   (latex-to-svg-backend-tests--with-fake-processes
-    (let* ((latex-to-svg-backend-renderer 'ratex)
-           (latex-to-svg-backend-ratex-program "ratex-direct")
+    (let* ((latex-to-svg-backend-ratex-program "ratex-direct")
            (latex-to-svg-backend-ratex-macros "")
            (doc "$x^2$")
-           (key (latex-to-svg-backend--cache-key doc))
+           (key (latex-to-svg-backend--cache-key doc 'ratex))
            (callbacks 0))
-      (latex-to-svg-backend--enqueue key doc (lambda () (cl-incf callbacks)) 3)
+      (latex-to-svg-backend--enqueue key doc (lambda () (cl-incf callbacks)) 3 'ratex)
       (should (= (length l2s-test-processes) 1))
       (let* ((process (car l2s-test-processes))
              (plist (aref process 3))
@@ -1786,13 +1826,13 @@ Return the SVG path."
   ;; exit 0 without an SVG root fails the same way.
   (dolist (outcome '(parse-error no-root))
     (latex-to-svg-backend-tests--with-fake-processes
-      (let* ((latex-to-svg-backend-renderer 'ratex)
-             (latex-to-svg-backend-ratex-program "ratex-direct")
+      (let* ((latex-to-svg-backend-ratex-program "ratex-direct")
              (latex-to-svg-backend-ratex-macros "")
              (doc (format "$\\SI{%s}{m}$" outcome))
-             (key (latex-to-svg-backend--cache-key doc))
+             (key (latex-to-svg-backend--cache-key doc 'ratex))
              (callbacks 0))
-        (latex-to-svg-backend--enqueue key doc (lambda () (cl-incf callbacks)))
+        (latex-to-svg-backend--enqueue key doc (lambda () (cl-incf callbacks))
+                                       nil 'ratex)
         (let* ((process (car l2s-test-processes))
                (scratch (aref process 4))
                (log (expand-file-name (concat key ".log")
@@ -1818,10 +1858,8 @@ Return the SVG path."
 (ert-deftest latex-to-svg-backend-ratex-compile-end-to-end ()
   ;; End to end (needs RaTeX's `render-svg'): inline, display and a numbered
   ;; environment render, with a macro from `-ratex-macros'.
-  (skip-unless (let ((latex-to-svg-backend-renderer 'ratex))
-                 (latex-to-svg-backend-tools-available-p)))
-  (let ((latex-to-svg-backend-renderer 'ratex)
-        (latex-to-svg-backend-ratex-macros "\\newcommand{\\myvec}[1]{\\mathbf{#1}}")
+  (skip-unless (latex-to-svg-backend-tools-available-p 'ratex))
+  (let ((latex-to-svg-backend-ratex-macros "\\newcommand{\\myvec}[1]{\\mathbf{#1}}")
         (latex-to-svg-backend-cache-directory (make-temp-file "l2s-ratex-e2e" t)))
     (unwind-protect
         (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t)))
@@ -1829,7 +1867,8 @@ Return the SVG path."
                          "\\[\\int_0^1 f\\,dx\\]"
                          "\\begin{align}\na&=b \\\\ % first\nc&=d\n\\end{align}"))
             (let ((done 'pending))
-              (latex-to-svg-backend doc :callback (lambda () (setq done t)))
+              (latex-to-svg-backend doc :renderer 'ratex
+                                    :callback (lambda () (setq done t)))
               (dotimes (_ 100)
                 (when (eq done 'pending)
                   (accept-process-output nil 0.1)))
@@ -1837,7 +1876,7 @@ Return the SVG path."
               (with-temp-buffer
                 (insert-file-contents
                  (latex-to-svg-backend--svg-file
-                  (latex-to-svg-backend--cache-key doc)))
+                  (latex-to-svg-backend--cache-key doc 'ratex)))
                 (should (search-forward "<svg xmlns='http://www.w3.org/2000/svg' width='" nil t))
                 (should (search-forward "currentColor" nil t))))))
       (delete-directory latex-to-svg-backend-cache-directory t))))

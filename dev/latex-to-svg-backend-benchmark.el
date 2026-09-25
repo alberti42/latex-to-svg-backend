@@ -66,7 +66,6 @@ for a buffer, and times until the last is done.  Everything runs inside
 this function's dynamic extent, so the process sentinels see the
 temporary cache directory."
   (let* ((dir (make-temp-file "l2s-bench" t))
-         (latex-to-svg-backend-renderer renderer)
          (latex-to-svg-backend-cache-directory dir)
          (latex-to-svg-backend-render-on-non-graphic t)
          (latex-to-svg-backend-metadata-prefix nil)
@@ -85,20 +84,24 @@ temporary cache directory."
           (pcase mode
             ('sequential
              (dolist (equation equations)
-               (let ((key (latex-to-svg-backend--cache-key equation))
+               (let ((key (latex-to-svg-backend--cache-key equation renderer))
                      (ok nil)
                      (start (float-time)))
-                 (latex-to-svg-backend equation :callback (lambda () (setq ok t)))
+                 (latex-to-svg-backend equation :renderer renderer
+                                       :callback (lambda () (setq ok t)))
                  (latex-to-svg-backend-benchmark--wait
                   (lambda () (or ok (not (gethash key pending)))) 30)
                  (when ok
                    (cl-incf done)
                    (push (- (float-time) start) times)))))
             ('batch
-             (let ((keys (mapcar #'latex-to-svg-backend--cache-key equations))
+             (let ((keys (mapcar (lambda (equation)
+                                   (latex-to-svg-backend--cache-key equation renderer))
+                                 equations))
                    (start (float-time)))
                (dolist (equation equations)
-                 (latex-to-svg-backend equation :callback (lambda () (cl-incf done))))
+                 (latex-to-svg-backend equation :renderer renderer
+                                       :callback (lambda () (cl-incf done))))
                (latex-to-svg-backend-benchmark--wait
                 (lambda () (seq-every-p (lambda (k) (not (gethash k pending))) keys))
                 120)
