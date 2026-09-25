@@ -125,7 +125,7 @@ What changes with RaTeX, from RaTeX v0.1.14:
 - **Delimiters.** RaTeX rejects `\(` and `\[`, so the engine removes the outer `$…$`, `\(…\)`, `$$…$$` or `\[…\]` and typesets in text style for the first two and in display style otherwise. An environment (`\begin{align}…`) is passed as is. `%` comments are removed and the lines joined, because `render-svg` reads one formula per line.
 - **Numbering.** Each `equation` or `align` is numbered from (1), `\notag` works, and `\tag{N}` sets a number. There is no counter to set and no compile metadata, so `:metadata` is ignored and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end's numbering does not work with RaTeX yet.
 - **Look.** The glyphs are KaTeX's fonts, and the layout is RaTeX's implementation of KaTeX's, so it can differ from TeX's in detail. Text in `\text{}` that the KaTeX fonts lack is drawn in a system font.
-- **Speed.** A new equation compiles in about 6 ms instead of about 320 ms; see [Benchmark](#benchmark).
+- **Speed.** A new equation compiles in 6–7 ms instead of 313–316 ms (medians); see [Benchmark](#benchmark).
 
 ## Benchmark
 
@@ -133,13 +133,14 @@ The time to compile a new equation, with each renderer, for the 20 equations in 
 
 | | LaTeX (`latex` + `dvisvgm`, `.fmt`) | RaTeX (`render-svg`) |
 | --- | ---: | ---: |
-| One equation at a time, median | 311–326 ms | 6 ms |
-| All 20 queued at once, until the last is ready | 1298–1370 ms | 55–56 ms |
-| One-time `.fmt` build | 381–389 ms | — |
+| One equation at a time, median | 313–316 ms | 6–7 ms |
+| One equation at a time, fastest to slowest | 300–353 ms | 6–12 ms |
+| All 20 queued at once, until the last is ready | 1321–1394 ms | 48–55 ms |
+| One-time `.fmt` build | 377–396 ms | — |
 
-*One at a time* compiles an equation, waits for it, then starts the next. *All at once* is what a front-end does when it opens a buffer; the compiles then run in parallel, which brings LaTeX to 65–68 ms per equation and RaTeX to 3 ms. Each figure is the range over two rounds; a single slow equation does not move a median.
+*One at a time* compiles an equation, waits for it, then starts the next. *All at once* is what a front-end does when it opens a buffer; the compiles then run in parallel, which brings LaTeX to 66–70 ms per equation and RaTeX to 2–3 ms. Each figure is the range over three rounds.
 
-The LaTeX runs used the default preamble. Loading `physics`, `stmaryrd`, `siunitx` and `mathtools` through `latex-to-svg-backend-appended-preamble` as well changed the median to 333–335 ms and the `.fmt` build to 527–538 ms: the `.fmt` loads the packages once, so each equation barely pays for them.
+The LaTeX runs used the default preamble. Loading `physics`, `stmaryrd`, `siunitx` and `mathtools` through `latex-to-svg-backend-appended-preamble` as well changed the median to 335–338 ms, the batch to 1366–1379 ms and the `.fmt` build to 517–529 ms: the `.fmt` loads the packages once, so each equation barely pays for them.
 
 Measured in a running Emacs 32.0.50 with native compilation and the package byte-compiled, on an Apple M2 (8 cores) under macOS 27.0, with TeX Live 2026 (pdfTeX 1.40.29), dvisvgm 3.6 and the RaTeX v0.1.14 release of `render-svg`.
 
