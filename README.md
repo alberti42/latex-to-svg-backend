@@ -125,6 +125,33 @@ What changes with RaTeX, from RaTeX v0.1.14:
 - **Delimiters.** RaTeX rejects `\(` and `\[`, so the engine removes the outer `$…$`, `\(…\)`, `$$…$$` or `\[…\]` and typesets in text style for the first two and in display style otherwise. An environment (`\begin{align}…`) is passed as is. `%` comments are removed and the lines joined, because `render-svg` reads one formula per line.
 - **Numbering.** Each `equation` or `align` is numbered from (1), `\notag` works, and `\tag{N}` sets a number. There is no counter to set and no compile metadata, so `:metadata` is ignored and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end's numbering does not work with RaTeX yet.
 - **Look.** The glyphs are KaTeX's fonts, and the layout is RaTeX's implementation of KaTeX's, so it can differ from TeX's in detail. Text in `\text{}` that the KaTeX fonts lack is drawn in a system font.
+- **Speed.** A new equation compiles in about 6 ms instead of about 320 ms; see [Benchmark](#benchmark).
+
+## Benchmark
+
+The time to compile a new equation, with each renderer, for the 20 equations in [`dev/latex-to-svg-backend-benchmark.el`](dev/latex-to-svg-backend-benchmark.el) (inline and display math, `equation`, `align`, matrices, `cases`). Every run starts from an empty cache, so every equation compiles. A cached equation costs the same with either renderer, because neither runs: showing it again, a theme switch and a font change are all cache hits.
+
+| | LaTeX (`latex` + `dvisvgm`, `.fmt`) | RaTeX (`render-svg`) |
+| --- | ---: | ---: |
+| One equation at a time, median | 311–326 ms | 6 ms |
+| All 20 queued at once, until the last is ready | 1298–1370 ms | 55–56 ms |
+| One-time `.fmt` build | 381–389 ms | — |
+
+*One at a time* compiles an equation, waits for it, then starts the next. *All at once* is what a front-end does when it opens a buffer; the compiles then run in parallel, which brings LaTeX to 65–68 ms per equation and RaTeX to 3 ms. Each figure is the range over two rounds; a single slow equation does not move a median.
+
+The LaTeX runs used the default preamble. Loading `physics`, `stmaryrd`, `siunitx` and `mathtools` through `latex-to-svg-backend-appended-preamble` as well changed the median to 333–335 ms and the `.fmt` build to 527–538 ms: the `.fmt` loads the packages once, so each equation barely pays for them.
+
+Measured in a running Emacs 32.0.50 with native compilation and the package byte-compiled, on an Apple M2 (8 cores) under macOS 27.0, with TeX Live 2026 (pdfTeX 1.40.29), dvisvgm 3.6 and the RaTeX v0.1.14 release of `render-svg`.
+
+To run it yourself from a checkout, byte-compile the package first. On the same machine, the commands below gave RaTeX 7 ms per equation and 79–80 ms for the batch, and LaTeX 330 ms and 1418–1449 ms. Loaded from source, without the first command, the Elisp that crops RaTeX's SVG runs uncompiled, and RaTeX took 9–10 ms and 130–133 ms.
+
+```sh
+emacs -Q -batch -L . -f batch-byte-compile latex-to-svg-backend*.el
+emacs -Q -batch -L . -l dev/latex-to-svg-backend-benchmark.el \
+      -f latex-to-svg-backend-benchmark-batch
+```
+
+In a running Emacs, load `dev/latex-to-svg-backend-benchmark.el` and call `M-x latex-to-svg-backend-benchmark`. Either way the LaTeX runs use your current preamble and settings, and your own cache is not touched.
 
 ## API
 
