@@ -248,7 +248,7 @@ Return the `.fmt' path on success, nil on failure.  Writes the preamble
 followed by `\\endofdump' to a scratch `.tex' in the `fmt/' subdirectory
 and runs `latex-to-svg-backend-latex-program' in `-ini' mode with
 `mylatexformat.ltx' to dump `<cache>/fmt/FKEY.fmt'.  The build log is in the
-`*latex-to-svg-backend-precompile*' buffer for inspection.
+`*latex-to-svg-backend-precompile-log*' buffer for inspection.
 
 A preamble that will not dump exits non-zero and yields nil (the caller
 falls back to a full compile, which reports the real LaTeX error).  A LaTeX
@@ -258,7 +258,7 @@ program that cannot be started at all is reported once instead."
          (fmt (concat base ".fmt"))
          (pre-tex (concat base ".tex"))
          (log (concat base ".log"))
-         (buffer (get-buffer-create "*latex-to-svg-backend-precompile*")))
+         (buffer (get-buffer-create "*latex-to-svg-backend-precompile-log*")))
     (with-current-buffer buffer (erase-buffer))
     ;; Pin UTF-8: see `latex-to-svg-backend--compile' on why the encoding is
     ;; fixed on write rather than declared with `inputenc'.
@@ -334,7 +334,7 @@ the blocklist short-circuits every later call.
 
 Called from the two ways precompilation can fail: the dump itself failed
 \(see `latex-to-svg-backend--build-format'; the log stays in the
-`*latex-to-svg-backend-precompile*' buffer), or the dump succeeded but a
+`*latex-to-svg-backend-precompile-log*' buffer), or the dump succeeded but a
 compile that loaded it failed.  In the latter case the same equation is
 about to be retried with the full inline preamble, so a genuinely broken
 equation is not mistaken for a broken format."

@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-preamble`, `-appended-preamble`, `-line-width`, `-precompile`,
   `-metadata-prefix`) moved to a Customize subgroup,
   `latex-to-svg-backend-latex`, inside `latex-to-svg-backend`.
+- The buffer holding the log of the `.fmt` build is now
+  `*latex-to-svg-backend-precompile-log*` (was
+  `*latex-to-svg-backend-precompile*`).
 
 ## [0.9.0] - 2026-09-09
 
