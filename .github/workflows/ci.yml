@@ -54,10 +54,13 @@ jobs:
       # Docstring conventions, exiting non-zero on any finding: `checkdoc-file'
       # only prints.  Both flags are set rather than left at their defaults,
       # so the step reports the same thing on every Emacs: the experimental
-      # verb check defaults to t up to Emacs 30 and nil from 31.
+      # verb check defaults to t up to Emacs 30 and nil from 31.  The package
+      # is loaded first, as melpazoid does: checkdoc flags an unquoted symbol
+      # only when that symbol is defined.
       - name: Checkdoc
         run: |
-          emacs -Q -batch --eval '(progn
+          emacs -Q -batch -L . --eval '(progn
+            (require (quote latex-to-svg-backend))
             (require (quote checkdoc))
             (setq checkdoc-force-docstrings-flag nil)
             (setq checkdoc-verb-check-experimental-flag nil)
