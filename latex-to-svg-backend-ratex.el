@@ -212,9 +212,8 @@ element."
                       (list x y (+ x w) (+ y h))))))
       (pcase-let ((`(,x0 ,y0 ,x1 ,y1) box))
         (concat (substring svg 0 root-beg)
-                (format (concat "<svg xmlns='http://www.w3.org/2000/svg' "
-                                "width='%.4fpt' height='%.4fpt' "
-                                "viewBox='%.4f %.4f %.4f %.4f'>")
+                (format "<svg xmlns='http://www.w3.org/2000/svg' \
+width='%.4fpt' height='%.4fpt' viewBox='%.4f %.4f %.4f %.4f'>"
                         (- x1 x0) (- y1 y0) x0 y0 (- x1 x0) (- y1 y0))
                 (string-replace latex-to-svg-backend--ratex-ink-svg
                                 "currentColor"
