@@ -1,5 +1,5 @@
-# Byte-compilation, checkdoc and the ERT suite, on every push to main and
-# every pull request.  The suite needs neither a TeX toolchain nor a
+# Byte-compilation, checkdoc and the ERT suite, on every push to main or
+# ratex and every pull request.  The suite needs neither a TeX toolchain nor a
 # graphical display, so the matrix job runs it as it stands; the one
 # end-to-end test skips there and gets a job of its own below.
 #
@@ -14,7 +14,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `ratex' is the RaTeX renderer's development branch; drop it once
+    # that work is merged.
+    branches: [main, ratex]
   pull_request:
 
 concurrency:
