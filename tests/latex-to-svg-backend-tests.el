@@ -1600,14 +1600,17 @@ Return the SVG path."
 (ert-deftest latex-to-svg-backend-safe-locals-exclude-the-dangerous-ones ()
   ;; A `:safe' defcustom is applied from a file's `-*-' line or a
   ;; `.dir-locals.el' with no prompt, so opening someone else's file applies
-  ;; it.  These five decide what is executed, what LaTeX code is compiled,
-  ;; and which directory the collector deletes files in -- they must never be
+  ;; it.  These decide what is executed, what LaTeX code is compiled, and
+  ;; which directory the collector deletes files in -- they must never be
   ;; marked safe, whatever else is.
   (dolist (v '(latex-to-svg-backend-latex-program
                latex-to-svg-backend-dvisvgm-program
                latex-to-svg-backend-preamble
                latex-to-svg-backend-appended-preamble
-               latex-to-svg-backend-cache-directory))
+               latex-to-svg-backend-cache-directory
+               latex-to-svg-backend-renderer
+               latex-to-svg-backend-ratex-program
+               latex-to-svg-backend-ratex-macros))
     (should (get v 'custom-type))
     (should-not (get v 'safe-local-variable))))
 
@@ -1622,6 +1625,222 @@ Return the SVG path."
     (dolist (bad (list "1pt}\\input{/etc/passwd}\\def\\x{" "\\linewidth"
                        "345 pt" "345" "pt" "345px" 345))
       (should-not (funcall safe bad)))))
+
+;;;; Renderer choice
+
+(ert-deftest latex-to-svg-backend-latex-cache-key-is-unchanged ()
+  ;; Adding a renderer must not re-key the LaTeX renderer's cache: every
+  ;; user's warm cache would be recompiled.  This is the formula the key had
+  ;; before the renderer choice existed.
+  (let ((latex-to-svg-backend-renderer 'latex))
+    (should (equal (latex-to-svg-backend--cache-key "E=mc^2")
+                   (secure-hash 'sha1
+                                (format "%d\0%s\0%s"
+                                        latex-to-svg-backend--cache-version
+                                        "E=mc^2"
+                                        (latex-to-svg-backend--preamble)))))))
+
+(ert-deftest latex-to-svg-backend-cache-key-separates-renderers ()
+  ;; The same LaTeX gets one key per renderer, the RaTeX key follows the
+  ;; macros and not the LaTeX preamble.
+  (let* ((latex-to-svg-backend-ratex-macros "")
+         (latex-key (let ((latex-to-svg-backend-renderer 'latex))
+                      (latex-to-svg-backend--cache-key "$x$")))
+         (latex-to-svg-backend-renderer 'ratex)
+         (ratex-key (latex-to-svg-backend--cache-key "$x$")))
+    (should-not (equal latex-key ratex-key))
+    (let ((latex-to-svg-backend-preamble "\\documentclass{minimal}"))
+      (should (equal ratex-key (latex-to-svg-backend--cache-key "$x$"))))
+    (let ((latex-to-svg-backend-ratex-macros "\\def\\v{\\mathbf{v}}"))
+      (should-not (equal ratex-key (latex-to-svg-backend--cache-key "$x$"))))))
+
+(ert-deftest latex-to-svg-backend-unknown-renderer-signals ()
+  ;; A misspelt renderer is reported, not quietly replaced by a default.
+  (let ((latex-to-svg-backend-renderer 'mathjax))
+    (should-error (latex-to-svg-backend--cache-key "$x$") :type 'user-error)
+    (should-error (latex-to-svg-backend-tools-available-p) :type 'user-error)))
+
+(ert-deftest latex-to-svg-backend-tools-available-p-follows-renderer ()
+  ;; Each renderer is available when its own programs are found.
+  (let ((latex-to-svg-backend-latex-program "l2s-no-such-latex")
+        (latex-to-svg-backend-ratex-program "emacs"))
+    (let ((latex-to-svg-backend-renderer 'latex))
+      (should-not (latex-to-svg-backend-tools-available-p)))
+    (let ((latex-to-svg-backend-renderer 'ratex))
+      (should (latex-to-svg-backend-tools-available-p))
+      (let ((latex-to-svg-backend-ratex-program "l2s-no-such-render-svg"))
+        (should-not (latex-to-svg-backend-tools-available-p))))))
+
+;;;; RaTeX renderer
+
+(ert-deftest latex-to-svg-backend-ratex-formula-strips-delimiters ()
+  ;; RaTeX rejects `\(' and `\[': the outer delimiter is removed, and it
+  ;; chooses text or display style.  An environment is typeset as is.
+  (let ((latex-to-svg-backend-ratex-macros ""))
+    (dolist (case '(("$x$" "x" t)
+                    ("\\(x\\)" "x" t)
+                    ("$$x$$" "x" nil)
+                    ("\\[ x \\]" "x" nil)
+                    ("\\begin{equation}x\\end{equation}"
+                     "\\begin{equation}x\\end{equation}" nil)
+                    ("x^2" "x^2" nil)))
+      (should (equal (latex-to-svg-backend--ratex-formula (nth 0 case))
+                     (cons (nth 1 case) (nth 2 case)))))))
+
+(ert-deftest latex-to-svg-backend-ratex-formula-is-one-line ()
+  ;; `render-svg' reads one formula per line: comments go, lines are joined,
+  ;; and the macros come first.  An escaped `%' is text, not a comment.
+  (let ((latex-to-svg-backend-ratex-macros
+         "\\def\\v{\\mathbf{v}} % bold\n\\def\\w{w}"))
+    (should (equal (latex-to-svg-backend--ratex-formula
+                    "\\begin{align}\na &= 5\\% \\\\ % first row\nb &= \\v\n\\end{align}")
+                   (cons (concat "\\def\\v{\\mathbf{v}}  \\def\\w{w} "
+                                 "\\begin{align} a &= 5\\% \\\\  b &= \\v "
+                                 "\\end{align}")
+                         nil))))
+  ;; In `\\%' the backslash is escaped, so the `%' starts a comment.
+  (should (equal (latex-to-svg-backend--ratex-one-line "a \\\\% gone\nb")
+                 "a \\\\ b")))
+
+(defconst latex-to-svg-backend-tests--ratex-output
+  (concat "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 20 10\" "
+          "width=\"20pt\" height=\"10pt\">"
+          "<path d=\"M1 -0.5 L5 2 Q6 9.5 3 4 Z\" fill=\"rgba(1,2,3,1)\" "
+          "fill-rule=\"nonzero\" stroke=\"none\"/>"
+          "<rect x=\"8\" y=\"3\" width=\"4\" height=\"1\" fill=\"rgba(1,2,3,1)\"/>"
+          "<path d=\"M14 2 L16 6\" fill=\"none\" stroke=\"rgba(255,0,0,1)\" "
+          "stroke-width=\"1\"/></svg>")
+  "An SVG shaped like `render-svg' output: ink outside and inside the viewport.")
+
+(ert-deftest latex-to-svg-backend-ratex-svg-crops-and-recolors ()
+  ;; The viewport is moved to the ink, the default ink becomes
+  ;; `currentColor', and a color of the formula's own stays.
+  (let ((out (latex-to-svg-backend--ratex-svg
+              latex-to-svg-backend-tests--ratex-output)))
+    ;; x from 1 to 16.5 (the stroke grows the last path by 0.5), y from -0.5
+    ;; to 9.5.
+    (should (string-prefix-p
+             (concat "<svg xmlns='http://www.w3.org/2000/svg' "
+                     "width='15.5000pt' height='10.0000pt' "
+                     "viewBox='1.0000 -0.5000 15.5000 10.0000'>")
+             out))
+    (should (= 3 (length (split-string out "currentColor"))))
+    (should-not (string-search "rgba(1,2,3,1)" out))
+    (should (string-search "stroke=\"rgba(255,0,0,1)\"" out))
+    ;; The root is in the form `--pad-svg' reads.
+    (should (string-search "width='17.5pt'"
+                           (latex-to-svg-backend--pad-svg out 1 nil)))))
+
+(ert-deftest latex-to-svg-backend-ratex-svg-keeps-empty-viewport ()
+  ;; Nothing drawn: RaTeX's own viewport is kept.  No root: nil.
+  (should (string-prefix-p
+           (concat "<svg xmlns='http://www.w3.org/2000/svg' "
+                   "width='3.0000pt' height='2.0000pt' "
+                   "viewBox='0.0000 0.0000 3.0000 2.0000'>")
+           (latex-to-svg-backend--ratex-svg
+            "<svg viewBox=\"0 0 3 2\" width=\"3pt\" height=\"2pt\"></svg>")))
+  (should-not (latex-to-svg-backend--ratex-svg "not an svg")))
+
+(ert-deftest latex-to-svg-backend-ratex-compile-argv-and-store ()
+  ;; `render-svg' is started directly with the formula file; its output is
+  ;; stored cropped and recolored, the callbacks run, no `.eld' is written,
+  ;; and the scratch directory and process buffer are removed.
+  (latex-to-svg-backend-tests--with-fake-processes
+    (let* ((latex-to-svg-backend-renderer 'ratex)
+           (latex-to-svg-backend-ratex-program "ratex-direct")
+           (latex-to-svg-backend-ratex-macros "")
+           (doc "$x^2$")
+           (key (latex-to-svg-backend--cache-key doc))
+           (callbacks 0))
+      (latex-to-svg-backend--enqueue key doc (lambda () (cl-incf callbacks)) 3)
+      (should (= (length l2s-test-processes) 1))
+      (let* ((process (car l2s-test-processes))
+             (plist (aref process 3))
+             (scratch (aref process 4))
+             (input (expand-file-name "equation.txt" scratch))
+             (output-buffer (plist-get plist :buffer))
+             (svg (latex-to-svg-backend--svg-file key)))
+        (should (equal (plist-get plist :command)
+                       (list "ratex-direct" "--input" input
+                             "--output-dir" (directory-file-name scratch)
+                             "--font-size" "40" "--dpr" "0.25"
+                             "--padding" "0" "--color" "#010203"
+                             "--inline")))
+        (should (equal (latex-to-svg-backend-tests--tex-source input) "x^2\n"))
+        (with-temp-file (expand-file-name "0001.svg" scratch)
+          (insert latex-to-svg-backend-tests--ratex-output))
+        (latex-to-svg-backend-tests--finish-fake-process process 0)
+        (should (= callbacks 1))
+        (with-temp-buffer
+          (insert-file-contents svg)
+          (should (search-forward "viewBox='1.0000 -0.5000" nil t))
+          (should (search-forward "currentColor" nil t)))
+        (should-not (file-exists-p (latex-to-svg-backend--meta-file key)))
+        (should-not (gethash key latex-to-svg-backend--pending))
+        (should-not (file-directory-p scratch))
+        (should-not (buffer-live-p output-buffer))))))
+
+(ert-deftest latex-to-svg-backend-ratex-failure-saves-process-output ()
+  ;; RaTeX rejects the formula: its message is kept in the log next to the
+  ;; SVG's place, a warning links to it, and the callbacks are dropped.  An
+  ;; exit 0 without an SVG root fails the same way.
+  (dolist (outcome '(parse-error no-root))
+    (latex-to-svg-backend-tests--with-fake-processes
+      (let* ((latex-to-svg-backend-renderer 'ratex)
+             (latex-to-svg-backend-ratex-program "ratex-direct")
+             (latex-to-svg-backend-ratex-macros "")
+             (doc (format "$\\SI{%s}{m}$" outcome))
+             (key (latex-to-svg-backend--cache-key doc))
+             (callbacks 0))
+        (latex-to-svg-backend--enqueue key doc (lambda () (cl-incf callbacks)))
+        (let* ((process (car l2s-test-processes))
+               (scratch (aref process 4))
+               (log (expand-file-name (concat key ".log")
+                                      (latex-to-svg-backend--shard-dir key))))
+          (if (eq outcome 'parse-error)
+              (latex-to-svg-backend-tests--finish-fake-process
+               process 1 "ERR    1 \\SI{3}{m} -- Undefined control sequence\n")
+            (with-temp-file (expand-file-name "0001.svg" scratch)
+              (insert "garbage"))
+            (latex-to-svg-backend-tests--finish-fake-process process 0))
+          (should (= callbacks 0))
+          (should-not (file-exists-p (latex-to-svg-backend--svg-file key)))
+          (should-not (gethash key latex-to-svg-backend--pending))
+          (should-not (file-directory-p scratch))
+          (should l2s-test-warnings)
+          (with-temp-buffer
+            (insert-file-contents log)
+            (should (search-forward (if (eq outcome 'parse-error)
+                                        "Undefined control sequence"
+                                      "output has no <svg> element")
+                                    nil t))))))))
+
+(ert-deftest latex-to-svg-backend-ratex-compile-end-to-end ()
+  ;; End to end (needs RaTeX's `render-svg'): inline, display and a numbered
+  ;; environment render, with a macro from `-ratex-macros'.
+  (skip-unless (let ((latex-to-svg-backend-renderer 'ratex))
+                 (latex-to-svg-backend-tools-available-p)))
+  (let ((latex-to-svg-backend-renderer 'ratex)
+        (latex-to-svg-backend-ratex-macros "\\newcommand{\\myvec}[1]{\\mathbf{#1}}")
+        (latex-to-svg-backend-cache-directory (make-temp-file "l2s-ratex-e2e" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t)))
+          (dolist (doc '("$x^2 + \\myvec{v}$"
+                         "\\[\\int_0^1 f\\,dx\\]"
+                         "\\begin{align}\na&=b \\\\ % first\nc&=d\n\\end{align}"))
+            (let ((done 'pending))
+              (latex-to-svg-backend doc :callback (lambda () (setq done t)))
+              (dotimes (_ 100)
+                (when (eq done 'pending)
+                  (accept-process-output nil 0.1)))
+              (should (eq done t))
+              (with-temp-buffer
+                (insert-file-contents
+                 (latex-to-svg-backend--svg-file
+                  (latex-to-svg-backend--cache-key doc)))
+                (should (search-forward "<svg xmlns='http://www.w3.org/2000/svg' width='" nil t))
+                (should (search-forward "currentColor" nil t))))))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (provide 'latex-to-svg-backend-tests)
 

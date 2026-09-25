@@ -163,7 +163,7 @@ short: TeX wraps log lines near column 80."
 
 ;;;; Capability
 
-(defun latex-to-svg-backend-tools-available-p ()
+(defun latex-to-svg-backend--latex-tools-available-p ()
   "Return non-nil when the LaTeX-to-SVG toolchain is on the variable `exec-path'."
   (and (executable-find latex-to-svg-backend-latex-program)
        (executable-find latex-to-svg-backend-dvisvgm-program)))
@@ -367,53 +367,6 @@ rarely needed."
 
 ;;;; Compile
 
-(defun latex-to-svg-backend--compile-failed
-    (key latex dir &optional process-output)
-  "Handle a failed LaTeX-to-SVG compile for KEY with source LATEX.
-DIR is the scratch directory containing equation.log when LaTeX
-created one.  PROCESS-OUTPUT is the captured stdout and stderr from
-the direct LaTeX/dvisvgm processes.  A persistent log containing the
-available diagnostics is written to the cache directory, and a
-warning is emitted with a clickable link to it.
-
-The log is copied byte-for-byte (`raw-text' in and out): a TeX log
-echoing an unencodable Unicode character would otherwise make
-`write-region' prompt for a coding system from a background compile."
-  (let* ((log-src (expand-file-name "equation.log" dir))
-         (log-dst (expand-file-name (concat key ".log")
-                                    (latex-to-svg-backend--shard-dir key)))
-         (have-tex-log (file-exists-p log-src))
-         (have-output (not (string-empty-p (or process-output ""))))
-         (snippet (truncate-string-to-width latex 60 nil nil t)))
-    (when (or have-tex-log have-output)
-      (let ((coding-system-for-read 'raw-text)
-            (coding-system-for-write 'raw-text))
-        (with-temp-file log-dst
-          (when have-tex-log
-            (insert-file-contents log-src)
-            (goto-char (point-max))
-            (unless (bolp)
-              (insert "\n")))
-          (when have-output
-            (when have-tex-log
-              (insert "\n--- process output ---\n"))
-            (insert process-output)))))
-    (display-warning
-     'latex-to-svg-backend
-     (format "LaTeX-to-SVG compile failed for: %s\nSee log: %s"
-             snippet
-             (if (file-exists-p log-dst) log-dst "(no log available)"))
-     :warning)
-    (when (and (file-exists-p log-dst) (get-buffer "*Warnings*"))
-      (with-current-buffer "*Warnings*"
-        (let ((inhibit-read-only t))
-          (goto-char (point-max))
-          (save-excursion
-            (when (search-backward log-dst nil t)
-              (make-text-button (point) (+ (point) (length log-dst))
-                                'action (lambda (_) (find-file log-dst))
-                                'help-echo "Open LaTeX log"))))))))
-
 (defun latex-to-svg-backend--write-metadata (key dir initial)
   "Write KEY's `.eld' sidecar pairing INITIAL with the compile's FINAL.
 Scans the just-finished compile's `equation.log' in scratch DIR for the
@@ -549,12 +502,7 @@ re-tints from cache without recompiling."
               (success
                ;; Capture compile metadata before DIR is cleaned up.
                (latex-to-svg-backend--write-metadata key dir metadata)
-               (dolist (cb (gethash key latex-to-svg-backend--pending))
-                 (condition-case cb-err
-                     (funcall cb)
-                   (error
-                    (message "latex-to-svg-backend: callback error: %S"
-                             cb-err)))))
+               (latex-to-svg-backend--notify-pending key))
               ;; A failed precompiled-format attempt is retried once with the
               ;; full inline preamble; keep the pending callback queue intact.
               (retry-format

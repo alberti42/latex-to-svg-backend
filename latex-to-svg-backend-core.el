@@ -27,8 +27,9 @@
 ;; The parts of `latex-to-svg-backend' that do not depend on how an
 ;; equation is typeset: the shared options, error reporting, colors,
 ;; sizing, cache addressing, the display image, the placeholder, the
-;; process chain and the cache garbage collector.  The LaTeX renderer
-;; lives in `latex-to-svg-backend-latex', the public entry point in
+;; process chain, the compile outcome and the cache garbage collector.
+;; The renderers live in `latex-to-svg-backend-latex' and
+;; `latex-to-svg-backend-ratex', the public entry point in
 ;; `latex-to-svg-backend'.  Load `latex-to-svg-backend', not this file.
 
 ;;; Code:
@@ -40,7 +41,7 @@
 (require 'svg)
 
 (defgroup latex-to-svg-backend nil
-  "Render LaTeX math to SVG images with `latex' + `dvisvgm'.
+  "Render LaTeX math to SVG images with `latex' + `dvisvgm' or with RaTeX.
 Equations are compiled to a color- and size-independent SVG, cached
 on disk by content, then tinted to the buffer foreground and scaled
 to the buffer font at display time."
@@ -98,9 +99,9 @@ buffer font across themes, faces, and text scale."
 
 (defcustom latex-to-svg-backend-use-placeholder nil
   "When non-nil, draw the placeholder panel instead of typesetting LaTeX.
-Also used as the automatic fallback when the toolchain
-\(`latex-to-svg-backend-latex-program' /
-`latex-to-svg-backend-dvisvgm-program') is unavailable."
+Also used as the automatic fallback when the programs of
+`latex-to-svg-backend-renderer' are unavailable (see
+`latex-to-svg-backend-tools-available-p')."
   :type 'boolean
   :safe #'booleanp
   :group 'latex-to-svg-backend)
@@ -739,6 +740,65 @@ startup error."
                         stage (error-message-string err)))
                (funcall done nil)))))))
     (run stages)))
+
+;;;; Compile outcome
+
+(defun latex-to-svg-backend--notify-pending (key)
+  "Call every callback queued for KEY (see `latex-to-svg-backend--enqueue').
+Called once KEY's SVG is in the cache.  A callback that signals is
+reported and does not keep the others from running."
+  (dolist (cb (gethash key latex-to-svg-backend--pending))
+    (condition-case cb-err
+        (funcall cb)
+      (error
+       (message "latex-to-svg-backend: callback error: %S" cb-err)))))
+
+(defun latex-to-svg-backend--compile-failed
+    (key latex dir &optional process-output)
+  "Handle a failed LaTeX-to-SVG compile for KEY with source LATEX.
+DIR is the scratch directory containing equation.log when LaTeX
+created one.  PROCESS-OUTPUT is the captured stdout and stderr from
+the renderer's processes.  A persistent log containing the
+available diagnostics is written to the cache directory, and a
+warning is emitted with a clickable link to it.
+
+The log is copied byte-for-byte (`raw-text' in and out): a TeX log
+echoing an unencodable Unicode character would otherwise make
+`write-region' prompt for a coding system from a background compile."
+  (let* ((log-src (expand-file-name "equation.log" dir))
+         (log-dst (expand-file-name (concat key ".log")
+                                    (latex-to-svg-backend--shard-dir key)))
+         (have-tex-log (file-exists-p log-src))
+         (have-output (not (string-empty-p (or process-output ""))))
+         (snippet (truncate-string-to-width latex 60 nil nil t)))
+    (when (or have-tex-log have-output)
+      (let ((coding-system-for-read 'raw-text)
+            (coding-system-for-write 'raw-text))
+        (with-temp-file log-dst
+          (when have-tex-log
+            (insert-file-contents log-src)
+            (goto-char (point-max))
+            (unless (bolp)
+              (insert "\n")))
+          (when have-output
+            (when have-tex-log
+              (insert "\n--- process output ---\n"))
+            (insert process-output)))))
+    (display-warning
+     'latex-to-svg-backend
+     (format "LaTeX-to-SVG compile failed for: %s\nSee log: %s"
+             snippet
+             (if (file-exists-p log-dst) log-dst "(no log available)"))
+     :warning)
+    (when (and (file-exists-p log-dst) (get-buffer "*Warnings*"))
+      (with-current-buffer "*Warnings*"
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (save-excursion
+            (when (search-backward log-dst nil t)
+              (make-text-button (point) (+ (point) (length log-dst))
+                                'action (lambda (_) (find-file log-dst))
+                                'help-echo "Open the compile log"))))))))
 
 ;;;; Cache maintenance (garbage collection)
 

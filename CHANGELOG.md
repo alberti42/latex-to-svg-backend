@@ -7,13 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A second renderer, RaTeX's `render-svg`, which needs no TeX installation.
+  `latex-to-svg-backend-renderer` chooses between `latex` (the default,
+  `latex` + `dvisvgm`) and `ratex`. The RaTeX renderer produces the same
+  color- and size-independent SVG, cropped to the ink, so recoloring,
+  resizing, `:background` and `:padding` work as with LaTeX. It typesets the
+  math KaTeX supports and loads no packages; see the README's *Renderers*
+  section for what differs.
+- `latex-to-svg-backend-ratex-program` (default `"render-svg"`) and
+  `latex-to-svg-backend-ratex-macros`, macro definitions put in front of every
+  formula RaTeX renders, in the Customize subgroup
+  `latex-to-svg-backend-ratex`.
+
 ### Changed
 
-- The library is split into three files: `latex-to-svg-backend.el` (the entry
+- `latex-to-svg-backend-tools-available-p` checks the programs of
+  `latex-to-svg-backend-renderer`. With the default renderer it checks
+  `latex` and `dvisvgm`, as before. The LaTeX renderer's cache keys are
+  unchanged, so no cached SVG is recompiled.
+- The library is split into four files: `latex-to-svg-backend.el` (the entry
   points), `latex-to-svg-backend-core.el` (the parts that do not depend on how
-  an equation is typeset) and `latex-to-svg-backend-latex.el` (the LaTeX
-  renderer). Load `latex-to-svg-backend` as before; no function or option was
-  renamed.
+  an equation is typeset), `latex-to-svg-backend-latex.el` (the LaTeX
+  renderer) and `latex-to-svg-backend-ratex.el` (the RaTeX renderer). Load
+  `latex-to-svg-backend` as before; no function or option was renamed.
 - The options of the LaTeX renderer (`-latex-program`, `-dvisvgm-program`,
   `-preamble`, `-appended-preamble`, `-line-width`, `-precompile`,
   `-metadata-prefix`) moved to a Customize subgroup,

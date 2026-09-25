@@ -1,7 +1,7 @@
 # Byte-compilation, checkdoc and the ERT suite, on every push to main or
 # ratex and every pull request.  The suite needs neither a TeX toolchain nor a
-# graphical display, so the matrix job runs it as it stands; the one
-# end-to-end test skips there and gets a job of its own below.
+# graphical display, so the matrix job runs it as it stands; the
+# end-to-end tests skip there and get a job of their own below.
 #
 # The matrix is the declared floor (29.1, the `Package-Requires' of
 # latex-to-svg-backend.el), then the newest of each series, then master.
@@ -44,12 +44,13 @@ jobs:
       - name: Report version
         run: emacs --version | head -1
 
-      # `-L .' lets each file `require' the other two.
+      # `-L .' lets each file `require' the others.
       - name: Byte-compile, warnings as errors
         run: |
           emacs -Q -batch -L . --eval '(setq byte-compile-error-on-warn t)' \
             -f batch-byte-compile latex-to-svg-backend-core.el \
-            latex-to-svg-backend-latex.el latex-to-svg-backend.el
+            latex-to-svg-backend-latex.el latex-to-svg-backend-ratex.el \
+            latex-to-svg-backend.el
 
       # Docstring conventions, exiting non-zero on any finding: `checkdoc-file'
       # only prints.  Both flags are set rather than left at their defaults,
@@ -66,6 +67,7 @@ jobs:
             (setq checkdoc-verb-check-experimental-flag nil)
             (dolist (file (quote ("latex-to-svg-backend-core.el"
                                   "latex-to-svg-backend-latex.el"
+                                  "latex-to-svg-backend-ratex.el"
                                   "latex-to-svg-backend.el")))
               (checkdoc-file file))
             (if (get-buffer "*Warnings*")
@@ -79,8 +81,8 @@ jobs:
 
   render:
     runs-on: ubuntu-latest
-    name: Whole suite against a real Emacs and a real TeX toolchain
-    # Four tests skip in every job above.  Three build an image and so need
+    name: Whole suite against a real Emacs, TeX toolchain and RaTeX
+    # Five tests skip in every job above.  Three build an image and so need
     # an Emacs with librsvg, which the nix builds behind setup-emacs are
     # not -- they are minimal by design, no image support and no window
     # system -- so this job takes Emacs from apt instead.  The fourth,
@@ -88,7 +90,9 @@ jobs:
     # thing: latex, dvisvgm and a `.fmt' dump.  The TeX packages are what
     # the default preamble and the precompilation need: standalone +
     # varwidth + mylatexformat (latex-extra), xcolor (latex-recommended),
-    # amssymb's fonts (fonts-recommended).
+    # amssymb's fonts (fonts-recommended).  The fifth,
+    # `latex-to-svg-backend-ratex-compile-end-to-end', needs RaTeX's
+    # `render-svg', which this job takes from a RaTeX release.
     steps:
       - uses: actions/checkout@v4
 
@@ -99,12 +103,22 @@ jobs:
             emacs texlive-latex-base texlive-latex-recommended \
             texlive-latex-extra texlive-fonts-recommended dvisvgm
 
+      - name: Install RaTeX
+        env:
+          RATEX: ratex-cli-v0.1.14-x86_64-unknown-linux-musl
+        run: |
+          curl --fail --silent --show-error --location \
+            "https://github.com/erweixin/RaTeX/releases/download/v0.1.14/$RATEX.tar.gz" \
+            | tar --extract --gzip --directory "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$RATEX" >> "$GITHUB_PATH"
+
       - name: Report versions
         run: |
           emacs --version | head -1
           latex --version | head -1
           dvisvgm --version
           kpsewhich mylatexformat.ltx
+          command -v render-svg
 
       # The point of this job is that nothing in it skips.  An Emacs
       # without SVG support would skip the three image tests silently, so

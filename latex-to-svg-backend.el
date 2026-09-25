@@ -39,6 +39,12 @@
 ;;     style).  Each unique equation therefore compiles at most once, and
 ;;     the cache is shared across every front-end.
 ;;
+;;   * A second renderer, RaTeX's `render-svg', needs no TeX installation
+;;     and typesets the math KaTeX supports (see
+;;     `latex-to-svg-backend-renderer').  It produces the same color- and
+;;     size-independent SVG; the `.fmt' precompilation and compile metadata
+;;     below are the LaTeX renderer's.
+;;
 ;;   * The on-disk SVG is COLOR-INDEPENDENT: dvisvgm `--currentcolor' emits
 ;;     the default ink as the literal token `currentColor', which is
 ;;     substituted with the buffer foreground at display time.  A theme
@@ -97,6 +103,41 @@
 
 (require 'latex-to-svg-backend-core)
 (require 'latex-to-svg-backend-latex)
+(require 'latex-to-svg-backend-ratex)
+
+;;;; Customization
+
+(defcustom latex-to-svg-backend-renderer 'latex
+  "Renderer that typesets equations.
+`latex' runs `latex' and `dvisvgm' (options in the
+`latex-to-svg-backend-latex' group): full LaTeX, with any package the
+preamble loads, from a TeX installation.  `ratex' runs RaTeX's
+`render-svg' (options in the `latex-to-svg-backend-ratex' group): one
+program and no TeX installation, for the math KaTeX supports and no
+packages.
+
+The renderer is part of the cache key, so each renderer's SVGs stay
+cached when you switch to the other."
+  :type '(choice (const :tag "LaTeX (latex + dvisvgm)" latex)
+                 (const :tag "RaTeX (render-svg)" ratex))
+  ;; Not `:safe': it decides which program runs.
+  :group 'latex-to-svg-backend)
+
+(defun latex-to-svg-backend--renderer ()
+  "Return `latex-to-svg-backend-renderer', signalling if it names no renderer."
+  (pcase latex-to-svg-backend-renderer
+    ((or 'latex 'ratex) latex-to-svg-backend-renderer)
+    (other (user-error "Unknown `latex-to-svg-backend-renderer': %S" other))))
+
+;;;; Capability
+
+(defun latex-to-svg-backend-tools-available-p ()
+  "Return non-nil when the programs of `latex-to-svg-backend-renderer' are found.
+They are looked up on the variable `exec-path': `latex' and `dvisvgm'
+for the LaTeX renderer, `render-svg' for the RaTeX one."
+  (pcase (latex-to-svg-backend--renderer)
+    ('latex (latex-to-svg-backend--latex-tools-available-p))
+    ('ratex (latex-to-svg-backend--ratex-tools-available-p))))
 
 ;;;; State
 
@@ -125,8 +166,11 @@ not wipe the cache.  Change it by hand, only for a real incompatibility.")
 
 (defun latex-to-svg-backend--cache-key (latex)
   "Return a stable content cache key for LATEX.
-The preamble is folded in so changing it invalidates the cache, as is
-`latex-to-svg-backend--cache-version' so a pipeline change re-keys warm
+The renderer's input besides LATEX is folded in so changing it
+invalidates the cache: the preamble for the LaTeX renderer (the key is
+the one it had before RaTeX was added), the renderer's name and
+`latex-to-svg-backend-ratex-macros' for the RaTeX one.  So is
+`latex-to-svg-backend--cache-version', so a pipeline change re-keys warm
 caches.  LATEX is the verbatim document body, so any change to it —
 including inline vs display delimiters or an injected `\setcounter' for
 equation numbering — changes the key on its own.  The key names the
@@ -136,22 +180,28 @@ display time), so neither size nor color is part of this key."
   (secure-hash 'sha1 (format "%d\0%s\0%s"
                              latex-to-svg-backend--cache-version
                              latex
-                             (latex-to-svg-backend--preamble))))
+                             (pcase (latex-to-svg-backend--renderer)
+                               ('latex (latex-to-svg-backend--preamble))
+                               ('ratex (latex-to-svg-backend--ratex-cache-salt))))))
 
 ;;;; Compile queue
 
 (defun latex-to-svg-backend--enqueue (key latex callback &optional metadata)
   "Queue CALLBACK for KEY and start a compile if none is running.
 
-KEY identifies the equation; LATEX is forwarded to
-`latex-to-svg-backend--compile' for the render, along with METADATA (the INITIAL
-value for the `.eld' sidecar).  Multiple callbacks sharing KEY (the same
-equation requested more than once) are coalesced onto a single in-flight
-compile; all are notified when it finishes."
+KEY identifies the equation; LATEX is forwarded to the compile of
+`latex-to-svg-backend-renderer': `latex-to-svg-backend--compile', along
+with METADATA (the INITIAL value for the `.eld' sidecar), or
+`latex-to-svg-backend--ratex-compile', which writes no sidecar.
+Multiple callbacks sharing KEY (the same equation requested more than
+once) are coalesced onto a single in-flight compile; all are notified
+when it finishes."
   (let ((pending (gethash key latex-to-svg-backend--pending)))
     (puthash key (cons callback pending) latex-to-svg-backend--pending)
     (unless pending
-      (latex-to-svg-backend--compile key latex metadata))))
+      (pcase (latex-to-svg-backend--renderer)
+        ('latex (latex-to-svg-backend--compile key latex metadata))
+        ('ratex (latex-to-svg-backend--ratex-compile key latex))))))
 
 ;;;; Public entry point
 
@@ -161,7 +211,8 @@ compile; all are notified when it finishes."
 METADATA, when non-nil and `latex-to-svg-backend-metadata-prefix' is set, is the
 INITIAL value stored in this equation's `.eld' sidecar (see
 `latex-to-svg-backend-metadata'); the FINAL value is captured from the compile
-log.  It is only recorded when a compile actually runs (a miss).
+log.  It is only recorded when a compile actually runs (a miss), and
+only by the LaTeX renderer.
 
 RESCALE-BY (default 1.0) multiplies the base display size for this one
 call, on top of the global `latex-to-svg-backend-font-scale'.  The engine has no
@@ -204,11 +255,14 @@ LATEX is placed *verbatim* in the LaTeX document body, so it must be
 valid there: pass math with its delimiters (`$x$', `\\(x\\)', `\\[x\\]')
 or a full environment (`\\begin{equation}...\\end{equation}').  The
 delimiters also choose inline vs display sizing — the engine does not.
+The RaTeX renderer has no document body: it removes the outer delimiter
+and typesets in text style for `$x$' and `\\(x\\)', in display style
+otherwise (see `latex-to-svg-backend--ratex-delimiters').
 
 Returns immediately with:
 
   * the placeholder panel image, when `latex-to-svg-backend-use-placeholder'
-    is set or the toolchain is unavailable (see
+    is set or the renderer's programs are unavailable (see
     `latex-to-svg-backend--placeholder');
   * the cached / on-disk equation image when it is ready;
   * nil when equations aren't renderable (see

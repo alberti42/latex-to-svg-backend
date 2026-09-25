@@ -33,7 +33,7 @@ Several other Emacs packages preview LaTeX for the user; a few do, under the hoo
 
 | Package | Renders → output | Tied to | Recolor | Numbers | `\eqref` | `.fmt` |
 | --- | --- | --- | --- | --- | --- | --- |
-| **latex-to-svg-backend** (this) | `latex`+`dvisvgm` → SVG | any buffer / bare string | yes | yes¹ | yes¹ | yes |
+| **latex-to-svg-backend** (this) | `latex`+`dvisvgm` or RaTeX → SVG | any buffer / bare string | yes | yes¹ | yes¹ | yes |
 | AUCTeX preview-latex | `latex`+`preview.sty` → PNG/SVG² | AUCTeX + `.tex` | no | yes | yes | no |
 | [`texfrag`](https://github.com/TobiasZawada/texfrag) | AUCTeX `preview.el` → PNG/SVG² | AUCTeX; many modes | no | yes | yes | no |
 | Org `org-latex-preview` (built-in) | `latex`+`dvipng`/`dvisvgm` → PNG/SVG | Org | no | no | no | no |
@@ -60,8 +60,11 @@ Equation numbering used to be the gap: the AUCTeX-based packages compile a whole
 ## Requirements
 
 - Emacs 29.1+ with SVG image support.
-- `latex` and `dvisvgm` on `exec-path` (from any TeX distribution). Without them, a placeholder panel boxing the raw LaTeX is shown instead (or set `latex-to-svg-backend-use-placeholder`).
-- Optionally the `mylatexformat` package (`mylatexformat.ltx`, bundled with most TeX distributions) for preamble precompilation. Absent, the engine simply skips the speedup — see [Preamble precompilation](#preamble-precompilation-fmt).
+- The programs of one of the two [renderers](#renderers) on `exec-path`:
+  - LaTeX (the default): `latex` and `dvisvgm`, from any TeX distribution. Optionally the `mylatexformat` package (`mylatexformat.ltx`, bundled with most TeX distributions) for preamble precompilation. Absent, the engine simply skips the speedup — see [Preamble precompilation](#preamble-precompilation-fmt).
+  - RaTeX: its `render-svg` program. No TeX installation.
+
+  Without them, a placeholder panel boxing the raw LaTeX is shown instead (or set `latex-to-svg-backend-use-placeholder`).
 
 ## Installation
 
@@ -100,6 +103,29 @@ The package (feature) is `latex-to-svg-backend`, and so is the recipe *name*
 (the feature you `require`); the repository is
 **`alberti42/latex-to-svg-backend`**.
 
+## Renderers
+
+`latex-to-svg-backend-renderer` chooses the program that typesets equations:
+
+- **`latex`** (the default) runs `latex` and `dvisvgm`. It is full LaTeX: any package the preamble loads, any macro it defines.
+- **`ratex`** runs `render-svg` from [RaTeX](https://github.com/erweixin/RaTeX), a math renderer written in Rust that parses KaTeX's syntax. It is one program and needs no TeX installation, but it typesets only the math KaTeX supports, and it loads no packages.
+
+Both produce the same color- and size-independent SVG, cropped to the ink, so everything under [API](#api) works the same with either. The renderer is part of the cache key, so each renderer's SVGs stay cached when you switch to the other.
+
+To use RaTeX, download the archive for your system from the [RaTeX releases](https://github.com/erweixin/RaTeX/releases) (`ratex-cli-<version>-<target>.tar.gz`), put its `render-svg` on `exec-path` or set `latex-to-svg-backend-ratex-program` to its path, and set:
+
+```elisp
+(setq latex-to-svg-backend-renderer 'ratex)
+```
+
+What changes with RaTeX, from RaTeX v0.1.14:
+
+- **No preamble.** RaTeX parses one formula at a time. `latex-to-svg-backend-ratex-macros` is put in front of every formula, so `\newcommand`, `\renewcommand` and `\def` there apply to every equation. `\newcommand` signals an error for a name RaTeX already defines (`\R`, `\ket`, …); use `\renewcommand` or `\def` for those.
+- **No packages.** A command KaTeX does not have fails with *Undefined control sequence*: siunitx's `\SI` and `\unit`, `\DeclareMathOperator` (use `\operatorname`), `\label`, `\setcounter`. mhchem's `\ce` and `\pu` are built in.
+- **Delimiters.** RaTeX rejects `\(` and `\[`, so the engine removes the outer `$…$`, `\(…\)`, `$$…$$` or `\[…\]` and typesets in text style for the first two and in display style otherwise. An environment (`\begin{align}…`) is passed as is. `%` comments are removed and the lines joined, because `render-svg` reads one formula per line.
+- **Numbering.** Each `equation` or `align` is numbered from (1), `\notag` works, and `\tag{N}` sets a number. There is no counter to set and no compile metadata, so `:metadata` is ignored and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end's numbering does not work with RaTeX yet.
+- **Look.** The glyphs are KaTeX's fonts, and the layout is RaTeX's implementation of KaTeX's, so it can differ from TeX's in detail. Text in `\text{}` that the KaTeX fonts lack is drawn in a system font.
+
 ## API
 
 ```elisp
@@ -132,7 +158,7 @@ Helpers a front-end typically needs for its refresh policy:
 | Function | Purpose |
 | --- | --- |
 | `latex-to-svg-backend-available-p` | SVG build support + graphical (or non-graphic opt-in) |
-| `latex-to-svg-backend-tools-available-p` | `latex` + `dvisvgm` on `exec-path` |
+| `latex-to-svg-backend-tools-available-p` | the programs of `latex-to-svg-backend-renderer` on `exec-path` (`latex` + `dvisvgm`, or `render-svg`) |
 | `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change; takes an optional `font-height` so it matches the render |
 | `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font; takes an optional `font-height`, and returns `nil` when no height is known (defer) |
 | `latex-to-svg-backend-foreground-color` | current tint color (`#rrggbb`) |
@@ -180,8 +206,25 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 
 ## Customization
 
+`M-x customize-group RET latex-to-svg-backend` shows the options of both renderers, with those of each renderer in its own subgroup (`latex-to-svg-backend-latex`, `latex-to-svg-backend-ratex`). Which renderer each option and command belongs to (the `latex-to-svg-backend-` prefix is left out):
+
+| Both renderers | LaTeX only | RaTeX only |
+| --- | --- | --- |
+| `-renderer` | `-latex-program` | `-ratex-program` |
+| `-cache-directory` | `-dvisvgm-program` | `-ratex-macros` |
+| `-cache-max-age` | `-preamble` | |
+| `-gc-interval` | `-appended-preamble` | |
+| `-font-scale` | `-line-width` | |
+| `-use-placeholder` | `-metadata-prefix` | |
+| `-render-on-non-graphic` | `-precompile` | |
+| `-svg-dpi` | `M-x …-flush-format` | |
+| `M-x …-gc`, `…-clear-cache`, `…-invalidate` | | |
+
+The functions under [API](#api) work with both; `latex-to-svg-backend-metadata` returns `nil` for an equation RaTeX rendered.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `latex-to-svg-backend-renderer` | `latex` | `latex` or `ratex` — see [Renderers](#renderers) |
 | `latex-to-svg-backend-latex-program` | `"latex"` | the `latex` binary |
 | `latex-to-svg-backend-dvisvgm-program` | `"dvisvgm"` | the `dvisvgm` binary |
 | `latex-to-svg-backend-preamble` | `standalone[varwidth]` + `amsmath`/`xcolor` | the document class and base packages |
@@ -196,6 +239,8 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 | `latex-to-svg-backend-svg-dpi` | `96.0` | points→pixels constant for sizing; rarely needs changing |
 | `latex-to-svg-backend-metadata-prefix` | `nil` | `nil` = off; the `\typeout` prefix enabling `.eld` compile-metadata capture (above) |
 | `latex-to-svg-backend-precompile` | `t` | preamble precompilation to a `.fmt` (below) |
+| `latex-to-svg-backend-ratex-program` | `"render-svg"` | RaTeX's `render-svg` binary |
+| `latex-to-svg-backend-ratex-macros` | `""` | macro definitions put in front of every formula RaTeX renders |
 
 ### Controlling the width of numbered equations (`latex-to-svg-backend-line-width`)
 
@@ -275,7 +320,9 @@ re-renders. A few common cases:
 
 If a compile fails, the engine warns with a clickable link to the LaTeX
 `.log` (kept next to the cached SVG under `svg/`), which is the fastest way to
-see exactly what TeX objected to.
+see exactly what TeX objected to. With the RaTeX renderer the same link opens
+RaTeX's output, which names the command it could not parse (see
+[Renderers](#renderers) for what RaTeX does not support).
 
 ## Tests
 
