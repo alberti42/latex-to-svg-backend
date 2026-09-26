@@ -385,7 +385,8 @@ cache).  All of KEY's files — `.svg', `.eld', `.log' — live together in
 (defun latex-to-svg-backend--touch (file)
   "Bump FILE's modification time to now (a last-use hint for GC).
 `latex-to-svg-backend-gc' treats the SVG mtime as the equation's last-use
-time, so this is called whenever a cached SVG is (re)loaded.
+time, so this is called whenever a cached SVG is (re)loaded.  A format
+file has its own (see `latex-to-svg-backend--touch-format').
 
 Signals `file-missing' when FILE is gone -- the caller treats that as a
 cache miss (see `latex-to-svg-backend--cached-image').  Any other refusal
@@ -906,23 +907,30 @@ An entry is the files named after one content key.  A compiled equation
 has an `.svg'; one whose compile failed has no `.svg', only its `.log'
 and, when the formula was at fault, its `.eld' failure record.")
 
-(defun latex-to-svg-backend--entry-lead (file)
+(defconst latex-to-svg-backend--format-extensions '(".fmt" ".eld" ".log")
+  "Extensions of the files a format entry can have, the leading one first.
+A format entry is the files named after one format key in `fmt/': a
+dumped format has a `.fmt' and its `.eld' stamp; a dump that failed
+leaves only its `.log'.")
+
+(defun latex-to-svg-backend--entry-lead (file &optional extensions)
   "Return the file that dates the cache entry FILE belongs to, or nil.
-That is the entry's first existing file in the order of
-`latex-to-svg-backend--entry-extensions': its SVG, whose mtime is bumped
-on every load, else its sidecar, else its log."
+That is the entry's first existing file in the order of EXTENSIONS,
+by default `latex-to-svg-backend--entry-extensions': its SVG, whose
+mtime is bumped on every load, else its sidecar, else its log."
   (let ((base (file-name-sans-extension file)))
     (seq-some (lambda (ext)
                 (let ((f (concat base ext)))
                   (and (file-exists-p f) f)))
-              latex-to-svg-backend--entry-extensions)))
+              (or extensions latex-to-svg-backend--entry-extensions))))
 
-(defun latex-to-svg-backend--delete-entry (file)
-  "Delete the cache entry FILE belongs to: its `.svg', `.eld' and `.log'.
-Return the bytes freed."
+(defun latex-to-svg-backend--delete-entry (file &optional extensions)
+  "Delete the cache entry FILE belongs to: its files with EXTENSIONS.
+EXTENSIONS is as for `latex-to-svg-backend--entry-lead'.  Return the
+bytes freed."
   (let ((base (file-name-sans-extension file))
         (freed 0))
-    (dolist (ext latex-to-svg-backend--entry-extensions)
+    (dolist (ext (or extensions latex-to-svg-backend--entry-extensions))
       (let ((f (concat base ext)))
         (when (file-exists-p f)
           (cl-incf freed (or (file-attribute-size (file-attributes f)) 0))
@@ -968,6 +976,25 @@ since collecting an already-collected cache frees nothing."
     (file-error
      (latex-to-svg-backend--warn-once "recording the GC timestamp" err))))
 
+(defun latex-to-svg-backend--gc-directory (name extensions max-age)
+  "Delete the entries in cache subdirectory NAME older than MAX-AGE days.
+EXTENSIONS is as for `latex-to-svg-backend--entry-lead', which dates
+each entry.  Return a cons (DELETED . BYTES-FREED)."
+  (let ((dir (expand-file-name name (latex-to-svg-backend--cache-dir)))
+        (regexp (concat (regexp-opt extensions) "\\'"))
+        (now (float-time))
+        (deleted 0) (freed 0))
+    (dolist (f (and (file-directory-p dir)
+                    (directory-files-recursively dir regexp)))
+      ;; Each entry once, through the file that dates it.
+      (when (equal f (latex-to-svg-backend--entry-lead f extensions))
+        (let ((mtime (float-time (file-attribute-modification-time
+                                  (file-attributes f)))))
+          (when (> (- now mtime) (* max-age 86400))
+            (cl-incf freed (latex-to-svg-backend--delete-entry f extensions))
+            (cl-incf deleted)))))
+    (cons deleted freed)))
+
 ;;;###autoload
 (defun latex-to-svg-backend-gc ()
   "Prune the on-disk equation cache of entries untouched for too long.
@@ -981,31 +1008,30 @@ no SVG, left by a failed compile, is dated by its `.eld' failure record,
 else by its `.log' (see `latex-to-svg-backend--entry-lead'); a pruned one
 is compiled again the next time it is needed.
 
+A precompiled format (`.fmt', with its stamp) older than the same age
+is deleted too: its mtime is bumped on every compile that loads it
+\(see `latex-to-svg-backend--touch-format'), and one still wanted is
+dumped again on the next compile.  So is the log of a dump that
+failed.
+
 Runs automatically about once a day (see `latex-to-svg-backend-gc-interval');
-this command forces a run now.  Returns a cons (DELETED . BYTES-FREED)."
+this command forces a run now.  Returns a cons (DELETED . BYTES-FREED),
+DELETED counting equations and formats."
   (interactive)
-  (let* ((svg-dir (expand-file-name "svg" (latex-to-svg-backend--cache-dir)))
-         (files (and (file-directory-p svg-dir)
-                     (directory-files-recursively
-                      svg-dir "\\.\\(?:svg\\|eld\\|log\\)\\'")))
-         (now (float-time))
-         (max-age (and latex-to-svg-backend-cache-max-age
-                       (* latex-to-svg-backend-cache-max-age 86400)))
-         (deleted 0) (freed 0))
-    (when max-age
-      (dolist (f files)
-        ;; Each entry once, through the file that dates it.
-        (when (equal f (latex-to-svg-backend--entry-lead f))
-          (let ((mtime (float-time (file-attribute-modification-time
-                                    (file-attributes f)))))
-            (when (> (- now mtime) max-age)
-              (cl-incf freed (latex-to-svg-backend--delete-entry f))
-              (cl-incf deleted))))))
+  (let ((equations '(0 . 0)) (formats '(0 . 0)))
+    (when-let* ((max-age latex-to-svg-backend-cache-max-age))
+      (setq equations (latex-to-svg-backend--gc-directory
+                       "svg" latex-to-svg-backend--entry-extensions max-age)
+            formats (latex-to-svg-backend--gc-directory
+                     "fmt" latex-to-svg-backend--format-extensions max-age)))
     (latex-to-svg-backend--record-gc-time)
-    (when (called-interactively-p 'interactive)
-      (message "latex-to-svg-backend: GC removed %d equation(s), freed %s"
-               deleted (file-size-human-readable freed)))
-    (cons deleted freed)))
+    (let ((freed (+ (cdr equations) (cdr formats))))
+      (when (called-interactively-p 'interactive)
+        (message "latex-to-svg-backend: GC removed %d equation(s) and %d \
+format(s), freed %s"
+                 (car equations) (car formats)
+                 (file-size-human-readable freed)))
+      (cons (+ (car equations) (car formats)) freed))))
 
 ;;;###autoload
 (defun latex-to-svg-backend-clear-cache ()

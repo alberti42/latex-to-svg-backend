@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-26
+
+### Added
+
+- `latex-to-svg-backend-preamble-local` (default `""`), LaTeX code written
+  after the preamble, meant to be set per project in `.dir-locals.el`,
+  typically to `\input{macros.tex}`. `\input` looks for the file in the
+  project root (`project-root`), or in `default-directory` outside a
+  project: the backend writes `\input@path` for it. The option has no
+  `:safe` predicate, so Emacs asks before applying it from a
+  `.dir-locals.el`. It is not dumped into the `.fmt`, so an edit to
+  `macros.tex` needs no format flush. The option and the directory are
+  part of the LaTeX cache key; when the option is empty, the key is
+  unchanged. The RaTeX engine ignores it. A directory holding one of
+  `\ { } % # ~`, or a remote one, gets no `\input@path` and is reported
+  once.
+
+### Changed
+
+- A `.fmt` is stale when the LaTeX binary that dumped it is another one:
+  each dump writes a stamp, `<fkey>.eld` next to the `.fmt`, holding the
+  binary's truename and modification time. The format is dumped again when
+  either differs, which also catches a switch to an older TeX. Before, a
+  `.fmt` older than the binary was stale. Formats dumped by 0.10.0 have no
+  stamp and are dumped once more. `latex-to-svg-backend-flush-format`
+  deletes the stamps too.
+- `latex-to-svg-backend-gc` also deletes a `.fmt`, with its stamp, when it
+  is older than `latex-to-svg-backend-cache-max-age`, and the log of a dump
+  that failed. Each compile that loads a `.fmt` bumps its modification time.
+
 ## [0.10.0] - 2026-09-26
 
 ### Added
@@ -365,7 +395,8 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
-[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.8.2...v0.8.3

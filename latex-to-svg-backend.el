@@ -6,7 +6,7 @@
 ;; Maintainer: Andrea Alberti <a.alberti82@gmail.com>
 ;; Assisted-by: Claude:claude-opus-4-8
 ;; URL: https://github.com/alberti42/latex-to-svg-backend
-;; Version: 0.10.0
+;; Version: 0.11.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tex, math, images
 
@@ -166,14 +166,17 @@ fresh.
 Do NOT tie this to the TeX/dvisvgm version — upgrading TeX Live should
 not wipe the cache.  Change it by hand, only for a real incompatibility.")
 
-(defun latex-to-svg-backend--cache-key (latex &optional engine)
+(defun latex-to-svg-backend--cache-key (latex &optional engine local)
   "Return a stable content cache key for LATEX rendered by ENGINE.
 ENGINE is `latex' (the default, also nil) or `ratex'; the caller has
 checked it (see `latex-to-svg-backend--engine').
 The engine's input besides LATEX is folded in so changing it
-invalidates the cache: the preamble for the LaTeX engine (the key is
-the one it had before RaTeX was added), the engine's name and
-`latex-to-svg-backend-ratex-macros' for the RaTeX one.  So is
+invalidates the cache: the preamble and LOCAL for the LaTeX engine
+\(see `latex-to-svg-backend--latex-cache-salt'; with LOCAL empty, the
+key is the one it had before RaTeX was added), the engine's name and
+`latex-to-svg-backend-ratex-macros' for the RaTeX one.  LOCAL is the
+text of `latex-to-svg-backend--local-preamble', nil meaning the current
+buffer's.  So is
 `latex-to-svg-backend--cache-version', so a pipeline change re-keys warm
 caches.  LATEX is the verbatim document body, so any change to it —
 including inline vs display delimiters or an injected `\setcounter' for
@@ -185,20 +188,22 @@ display time), so neither size nor color is part of this key."
                              latex-to-svg-backend--cache-version
                              latex
                              (pcase-exhaustive engine
-                               ((or 'nil 'latex) (latex-to-svg-backend--preamble))
+                               ((or 'nil 'latex)
+                                (latex-to-svg-backend--latex-cache-salt local))
                                ('ratex (latex-to-svg-backend--ratex-cache-salt))))))
 
 ;;;; Compile queue
 
-(defun latex-to-svg-backend--enqueue (key latex waiter &optional metadata engine)
+(defun latex-to-svg-backend--enqueue (key latex waiter &optional metadata engine local)
   "Queue WAITER for KEY and start a compile if none is running.
 
 KEY identifies the equation; WAITER is what to notify (see
 `latex-to-svg-backend--waiter').  LATEX is forwarded to the compile of
 ENGINE (`latex', the default, also nil, or `ratex'):
 `latex-to-svg-backend--compile', along with METADATA (the INITIAL value
-for the `.eld' sidecar), or `latex-to-svg-backend--ratex-compile', which
-writes no sidecar.
+for the `.eld' sidecar) and LOCAL (as for
+`latex-to-svg-backend--cache-key'), or
+`latex-to-svg-backend--ratex-compile', which writes no sidecar.
 Multiple waiters sharing KEY (the same equation requested more than
 once) are coalesced onto a single in-flight compile; all are notified
 when it finishes."
@@ -206,21 +211,22 @@ when it finishes."
     (puthash key (cons waiter pending) latex-to-svg-backend--pending)
     (unless pending
       (pcase-exhaustive engine
-        ((or 'nil 'latex) (latex-to-svg-backend--compile key latex metadata))
+        ((or 'nil 'latex)
+         (latex-to-svg-backend--compile key latex metadata local))
         ('ratex (latex-to-svg-backend--ratex-compile key latex))))))
 
 ;;;; Failed compiles and the fallback engine
 
-(defun latex-to-svg-backend--sidecar (latex engine key)
-  "Return the plist in the `.eld' sidecar of LATEX rendered by ENGINE, or nil.
-KEY is the content key of LATEX and ENGINE.  The sidecar holds compile
-metadata (see `latex-to-svg-backend-metadata') or a failure record (see
-`latex-to-svg-backend--record-failure').
+(defun latex-to-svg-backend--sidecar (key)
+  "Return the plist in the `.eld' sidecar of the equation of KEY, or nil.
+KEY is a content key (see `latex-to-svg-backend--cache-key').  The
+sidecar holds compile metadata (see `latex-to-svg-backend-metadata') or
+a failure record (see `latex-to-svg-backend--record-failure').
 
 A sidecar that cannot be parsed (truncated by a crash mid-write) yields
 nil, but it is not left to rot: only a compile can rewrite it, and the
-cached SVG would keep any compile from happening, so LATEX's whole cache
-entry is discarded (`latex-to-svg-backend-invalidate') and the next
+cached SVG would keep any compile from happening, so the whole cache
+entry is discarded (`latex-to-svg-backend--invalidate-key') and the next
 render rebuilds both the SVG and the sidecar.  Done at most once per
 equation per session."
   (let ((file (latex-to-svg-backend--meta-file key)))
@@ -235,7 +241,7 @@ equation per session."
           "discarding an unreadable metadata sidecar" err)
          (unless (gethash key latex-to-svg-backend--metadata-repaired)
            (puthash key t latex-to-svg-backend--metadata-repaired)
-           (latex-to-svg-backend-invalidate latex engine))
+           (latex-to-svg-backend--invalidate-key key))
          nil)
         ;; Not repairable by recompiling -- and the deletions that a repair
         ;; would attempt are exactly what is failing here.  Report it.
@@ -243,11 +249,11 @@ equation per session."
          (latex-to-svg-backend--warn-once
           "reading compile metadata" err 'buffer))))))
 
-(defun latex-to-svg-backend--failed-p (latex engine key)
-  "Return non-nil when LATEX has a failure record for ENGINE.
-KEY is the content key of LATEX and ENGINE.  See
+(defun latex-to-svg-backend--failed-p (key)
+  "Return non-nil when the equation of KEY has a failure record.
+KEY is a content key (see `latex-to-svg-backend--cache-key').  See
 `latex-to-svg-backend--record-failure'."
-  (plist-get (latex-to-svg-backend--sidecar latex engine key) :failed))
+  (plist-get (latex-to-svg-backend--sidecar key) :failed))
 
 (defun latex-to-svg-backend--fallback-unavailable (key latex engine fallback buffer quiet)
   "Report that LATEX failed with ENGINE and FALLBACK cannot be run.
@@ -278,18 +284,20 @@ that shows the equations."
   (unless quiet
     (latex-to-svg-backend--report-failure key latex engine buffer)))
 
-(defun latex-to-svg-backend--fall-back (latex engine fallback metadata waiter)
+(defun latex-to-svg-backend--fall-back (latex engine fallback metadata waiter local)
   "Take WAITER's request for LATEX over from ENGINE to FALLBACK.
 Called from the compile sentinel once ENGINE rejected LATEX (see
-`latex-to-svg-backend--compile-failed').  LATEX is compiled with
-FALLBACK under FALLBACK's own cache key, along with METADATA, and
-WAITER's callback fires when that SVG is ready; the caller then
+`latex-to-svg-backend--compile-failed').  LOCAL is the requesting
+buffer's text of `latex-to-svg-backend--local-preamble', read when the
+request was made: the sentinel's current buffer is another.  LATEX
+is compiled with FALLBACK under FALLBACK's own cache key, along with
+METADATA, and WAITER's callback fires when that SVG is ready; the caller then
 re-queries and `latex-to-svg-backend' finds it.  When FALLBACK's SVG, or
 its failure record, is there already, the callback fires now.  When
 FALLBACK's programs are missing, that is reported (see
 `latex-to-svg-backend--fallback-unavailable')."
-  (let ((key (latex-to-svg-backend--cache-key latex engine))
-        (fallback-key (latex-to-svg-backend--cache-key latex fallback))
+  (let ((key (latex-to-svg-backend--cache-key latex engine local))
+        (fallback-key (latex-to-svg-backend--cache-key latex fallback local))
         (buffer (plist-get waiter :buffer)))
     (cond
      ((not (latex-to-svg-backend-tools-available-p fallback))
@@ -297,10 +305,10 @@ FALLBACK's programs are missing, that is reported (see
        key latex engine fallback (and (buffer-live-p buffer) buffer)
        (plist-get waiter :quiet)))
      ((or (file-exists-p (latex-to-svg-backend--svg-file fallback-key))
-          (latex-to-svg-backend--failed-p latex fallback fallback-key))
+          (latex-to-svg-backend--failed-p fallback-key))
       (funcall (plist-get waiter :callback)))
      (t (latex-to-svg-backend--enqueue
-         fallback-key latex waiter metadata fallback)))))
+         fallback-key latex waiter metadata fallback local)))))
 
 (defun latex-to-svg-backend--report-fallbacks (buffer engine fallback)
   "Say how many equations in BUFFER FALLBACK drew because ENGINE failed.
@@ -437,7 +445,9 @@ is invoked once, when the SVG is ready, so the caller can re-query
 it.  Concurrent requests for the same equation share one compile.
 
 The image is tinted to the current buffer foreground and scaled to
-the buffer font at build time, so call within the target buffer."
+the buffer font at build time, so call within the target buffer.  The
+LaTeX engine also reads the buffer's
+`latex-to-svg-backend-preamble-local' there."
   (setq engine (latex-to-svg-backend--engine engine)
         fallback (and fallback (latex-to-svg-backend--engine fallback)))
   (when (eq fallback engine)
@@ -448,7 +458,8 @@ the buffer font at build time, so call within the target buffer."
           (not (latex-to-svg-backend-tools-available-p engine)))
       (latex-to-svg-backend--placeholder latex))
      (t
-      (let* ((key (latex-to-svg-backend--cache-key latex engine))
+      (let* ((local (latex-to-svg-backend--local-preamble))
+             (key (latex-to-svg-backend--cache-key latex engine local))
              (compiled (file-exists-p (latex-to-svg-backend--svg-file key)))
              (image (and compiled
                          (latex-to-svg-backend--cached-image
@@ -460,7 +471,7 @@ the buffer font at build time, so call within the target buffer."
          ;; The caller re-renders when the buffer is displayed.
          (compiled nil)
          ;; ENGINE rejected LATEX before: do not compile it again.
-         ((latex-to-svg-backend--failed-p latex engine key)
+         ((latex-to-svg-backend--failed-p key)
           (cond
            ((null fallback)
             (unless quiet
@@ -492,8 +503,8 @@ the buffer font at build time, so call within the target buffer."
                 (and fallback
                      (lambda (waiter)
                        (latex-to-svg-backend--fall-back
-                        latex engine fallback metadata waiter))))
-               metadata engine))
+                        latex engine fallback metadata waiter local))))
+               metadata engine local))
             nil)))))))
 
 ;;;###autoload
@@ -513,10 +524,17 @@ was reported, so a failure that remains is reported again.
 
 ENGINE is the engine the render was made with, as for
 `latex-to-svg-backend': each engine's SVG has its own cache entry, so
-only that one is dropped."
-  (let* ((key (latex-to-svg-backend--cache-key
-               latex (latex-to-svg-backend--engine engine)))
-         (file (latex-to-svg-backend--svg-file key))
+only that one is dropped.  Call it in the buffer the render was made
+for, as `latex-to-svg-backend-preamble-local' is part of the key."
+  (latex-to-svg-backend--invalidate-key
+   (latex-to-svg-backend--cache-key latex (latex-to-svg-backend--engine engine))))
+
+(defun latex-to-svg-backend--invalidate-key (key)
+  "Forget the cached render of the equation of KEY.
+KEY is a content key (see `latex-to-svg-backend--cache-key').  See
+`latex-to-svg-backend-invalidate', which computes it in the current
+buffer; this takes it from a caller that computed it elsewhere."
+  (let* ((file (latex-to-svg-backend--svg-file key))
          (meta (latex-to-svg-backend--meta-file key))
          (prefix (concat key "@"))
          (stale nil))
@@ -559,7 +577,7 @@ cache entry so the next render rebuilds it (see
 `latex-to-svg-backend--sidecar')."
   (let* ((engine (latex-to-svg-backend--engine engine))
          (plist (latex-to-svg-backend--sidecar
-                 latex engine (latex-to-svg-backend--cache-key latex engine))))
+                 (latex-to-svg-backend--cache-key latex engine))))
     (unless (plist-get plist :failed)
       plist)))
 
@@ -578,7 +596,7 @@ say which engine typeset it."
      ((file-exists-p (latex-to-svg-backend--svg-file key)) engine)
      ((and fallback
            (not (eq fallback engine))
-           (latex-to-svg-backend--failed-p latex engine key)
+           (latex-to-svg-backend--failed-p key)
            (file-exists-p (latex-to-svg-backend--svg-file
                            (latex-to-svg-backend--cache-key latex fallback))))
       fallback))))

@@ -31,6 +31,7 @@
 ;;; Code:
 
 (require 'latex-to-svg-backend-core)
+(require 'project)
 
 (defgroup latex-to-svg-backend-latex nil
   "The LaTeX engine of `latex-to-svg-backend': `latex' + `dvisvgm'."
@@ -74,6 +75,26 @@ Use this to load additional packages (e.g. `\\usepackage{braket}',
 `\\usepackage{physics}') without replacing the base preamble.  The
 value is folded into the cache key, so changing it automatically
 invalidates cached SVGs."
+  :type 'string
+  :group 'latex-to-svg-backend-latex)
+
+(defcustom latex-to-svg-backend-preamble-local ""
+  "LaTeX code written after the preamble, meant to be set per project.
+Set it in `.dir-locals.el' to the definitions a project's equations
+need, typically `\\input{macros.tex}'.  `\\input' looks for the file in
+the project root (`project-root'), or in `default-directory' outside a
+project, so `\\input{paper/macros.tex}' names a file below the root.
+
+Unlike `latex-to-svg-backend-appended-preamble', this is not dumped into
+the precompiled format (see `latex-to-svg-backend-precompile'): it is
+read on every compile, so an edit to `macros.tex' needs no format flush.
+Heavy packages belong in `latex-to-svg-backend-appended-preamble', where
+they are dumped once.
+
+The value and the directory are folded into the cache key; the contents
+of `macros.tex' are not, so after editing it the equations have to be
+compiled again (`latex-to-svg-backend-invalidate').  The RaTeX engine
+ignores this option."
   :type 'string
   :group 'latex-to-svg-backend-latex)
 
@@ -121,9 +142,10 @@ Requires `mylatexformat.ltx' on the TeX search path (part of most TeX
 distributions).  When it is missing, or the dump fails, or a compile
 using the format later fails, the backend transparently falls back to
 embedding the full preamble in each equation — correctness never depends
-on this option.  A stale format after a TeX toolchain upgrade is detected
-and rebuilt automatically (the binary is newer than the `.fmt');
-`latex-to-svg-backend-flush-format' is the manual escape hatch."
+on this option.  A format dumped by another LaTeX binary (after a TeX
+toolchain upgrade, or with another TeX on the variable `exec-path') is
+detected and dumped again; `latex-to-svg-backend-flush-format' is the
+manual escape hatch."
   :type 'boolean
   :safe #'booleanp
   :group 'latex-to-svg-backend-latex)
@@ -151,7 +173,7 @@ short: TeX wraps log lines near column 80."
 ;; Precompiled-preamble (.fmt) bookkeeping, keyed by format key (a hash of
 ;; the preamble text + LaTeX program, see `latex-to-svg-backend--format-key').
 ;; `--format-checked' records keys whose `.fmt' was verified fresh this
-;; session, so the freshness (mtime) check runs at most once per key;
+;; session, so the freshness check runs at most once per key;
 ;; `--format-blocklist' records keys whose format produced a compile
 ;; failure, so precompilation is abandoned for them for the rest of the
 ;; session and the backend falls back to full compiles.
@@ -185,6 +207,57 @@ appended so the `varwidth' box uses that width (see that variable)."
    (when latex-to-svg-backend-line-width
      (format "\n\\makeatletter\\def\\sa@width{%s}\\makeatother"
              latex-to-svg-backend-line-width))))
+
+(defun latex-to-svg-backend--input-directory ()
+  "Return the directory `\\input' searches for the current buffer, or nil.
+That is the project root (`project-root'), else `default-directory'.
+The directory is written into TeX code (see
+`latex-to-svg-backend--local-preamble'), so a directory whose name
+holds a character TeX reads as code is refused, as is a remote one
+\(the compile runs locally): the refusal is reported once and nil
+returned, and no `\\input@path' is written."
+  (let ((dir (file-name-as-directory
+              (expand-file-name
+               (if-let* ((project (project-current)))
+                   (project-root project)
+                 default-directory)))))
+    (cond
+     ;; LaTeX runs on this machine and cannot open a file on another.
+     ((file-remote-p dir)
+      (latex-to-svg-backend--warn-once
+       "searching a remote directory for \\input files"
+       (list 'error (format "%s is remote, but LaTeX runs locally" dir))))
+     ;; The OS allows characters in a path that TeX reads as code: `%'
+     ;; starts a comment, `#' a parameter, `\' a command, braces a group,
+     ;; and `~' is a space.
+     ((string-match-p "[\\{}%#~]" dir)
+      (latex-to-svg-backend--warn-once
+       "searching for \\input files"
+       (list 'error (format "%s holds one of \\ { } %% # ~" dir))))
+     (t dir))))
+
+(defun latex-to-svg-backend--local-preamble ()
+  "Return the current buffer's text for after the preamble, or \"\".
+That is `latex-to-svg-backend-preamble-local', preceded by a line
+pointing `\\input@path' to `latex-to-svg-backend--input-directory', or
+\"\" when the option is empty."
+  (if (string-empty-p latex-to-svg-backend-preamble-local)
+      ""
+    (concat (when-let* ((dir (latex-to-svg-backend--input-directory)))
+              (format "\\makeatletter\\def\\input@path{{%s}}\\makeatother\n"
+                      dir))
+            latex-to-svg-backend-preamble-local)))
+
+(defun latex-to-svg-backend--latex-cache-salt (&optional local)
+  "Return what `latex-to-svg-backend--cache-key' folds in for LaTeX.
+That is the preamble, then LOCAL (the text of
+`latex-to-svg-backend--local-preamble', nil meaning the current
+buffer's) when it is not empty, so an empty LOCAL leaves the key as it
+was before LOCAL existed."
+  (let ((local (or local (latex-to-svg-backend--local-preamble))))
+    (if (string-empty-p local)
+        (latex-to-svg-backend--preamble)
+      (concat (latex-to-svg-backend--preamble) "\n" local))))
 
 ;;;; Preamble precompilation (.fmt)
 
@@ -224,6 +297,71 @@ either yields a distinct `.fmt' (and a rebuild on the next render)."
 (defun latex-to-svg-backend--format-file (fkey)
   "Return the precompiled format file path (`.fmt') for FKEY."
   (expand-file-name (concat fkey ".fmt") (latex-to-svg-backend--fmt-dir)))
+
+(defun latex-to-svg-backend--format-stamp-file (format-file)
+  "Return the path of the stamp (`.eld') of FORMAT-FILE.
+The stamp names the LaTeX binary that dumped FORMAT-FILE (see
+`latex-to-svg-backend--binary-stamp')."
+  (concat (file-name-sans-extension format-file) ".eld"))
+
+(defun latex-to-svg-backend--binary-stamp (binary)
+  "Return the plist identifying the LaTeX BINARY, for a format stamp.
+That is `(:binary TRUENAME :mtime MTIME)': the file BINARY resolves to
+and its modification time.  A TeX Live release installs its binaries
+under a directory named after its year, so an upgrade changes the
+truename; another TeX first on variable `exec-path' changes either."
+  (let ((truename (file-truename binary)))
+    (list :binary truename
+          :mtime (file-attribute-modification-time
+                  (file-attributes truename)))))
+
+(defun latex-to-svg-backend--format-fresh-p (format-file binary)
+  "Return non-nil when FORMAT-FILE was dumped by the LaTeX BINARY.
+That is when its stamp matches `latex-to-svg-backend--binary-stamp' for
+BINARY.  A format with no stamp is stale, so a format dumped before
+stamps existed is dumped again once.  So is one with an unreadable
+stamp, which is reported once: the dump writes a new stamp."
+  (let ((file (latex-to-svg-backend--format-stamp-file format-file)))
+    (when (file-readable-p file)
+      (when-let* ((stamp (condition-case err
+                             (with-temp-buffer
+                               (insert-file-contents file)
+                               (read (current-buffer)))
+                           ((end-of-file invalid-read-syntax file-error)
+                            (latex-to-svg-backend--warn-once
+                             "reading a format stamp" err))))
+                  ((consp stamp))
+                  (mtime (plist-get stamp :mtime))
+                  (current (latex-to-svg-backend--binary-stamp binary)))
+        (and (equal (plist-get stamp :binary) (plist-get current :binary))
+             (plist-get current :mtime)
+             (time-equal-p mtime (plist-get current :mtime)))))))
+
+(defun latex-to-svg-backend--write-format-stamp (format-file binary)
+  "Record that the LaTeX BINARY dumped FORMAT-FILE, in its stamp.
+A stamp that cannot be written is reported once; the format still
+serves this session and is dumped again in the next."
+  (condition-case err
+      (with-temp-file (latex-to-svg-backend--format-stamp-file format-file)
+        (prin1 (latex-to-svg-backend--binary-stamp binary) (current-buffer)))
+    (file-error
+     (latex-to-svg-backend--warn-once "writing a format stamp" err))))
+
+(defun latex-to-svg-backend--touch-format (format-file)
+  "Bump FORMAT-FILE's modification time and return FORMAT-FILE, or nil.
+`latex-to-svg-backend-gc' deletes a format whose mtime is older than
+`latex-to-svg-backend-cache-max-age', so this runs on every compile that
+loads it: a session that runs for longer must not lose the format it
+uses.  Nil means another session collected FORMAT-FILE a moment ago;
+the caller then compiles with the full preamble.  Any other refusal by
+the filesystem is reported once and FORMAT-FILE returned: the format
+works, it only ages out."
+  (condition-case err
+      (progn (set-file-times format-file) format-file)
+    (file-missing nil)
+    (file-error
+     (latex-to-svg-backend--warn-once "recording format use" err)
+     format-file)))
 
 (defun latex-to-svg-backend--precompile-available-p ()
   "Return non-nil when the preamble can be dumped to a `.fmt'.
@@ -282,17 +420,23 @@ program that cannot be started at all is reported once instead."
                   "dumping the LaTeX preamble" err)))))
       (delete-file pre-tex)
       (if (and (eql rv 0) (file-exists-p fmt))
-          (progn (delete-file log) fmt)
+          (progn
+            (delete-file log)
+            (when-let* ((binary (latex-to-svg-backend--latex-binary)))
+              (latex-to-svg-backend--write-format-stamp fmt binary))
+            fmt)
         (delete-file fmt)
         nil))))
 
 (defun latex-to-svg-backend--ensure-format ()
   "Return a fresh precompiled preamble format file path, or nil.
 Builds the `.fmt' on first use (synchronously, once per session per
-preamble) and caches it on disk.  Rebuilds it when the LaTeX binary is
-newer than the `.fmt' (e.g. after a TeX toolchain upgrade, which would
-otherwise fail every compile with a format-version mismatch).  Returns
-nil — so the caller uses a full compile — when precompilation is off,
+preamble) and caches it on disk.  Rebuilds it when its stamp names
+another LaTeX binary (see `latex-to-svg-backend--format-fresh-p'), as
+after a TeX toolchain upgrade, which would otherwise fail every compile
+with a format-version mismatch.  Bumps the mtime of the format it
+returns (see `latex-to-svg-backend--touch-format').  Returns nil — so
+the caller uses a full compile — when precompilation is off,
 `mylatexformat' is unavailable, the dump fails, or the format has been
 blocklisted after an earlier failure."
   (when latex-to-svg-backend-precompile
@@ -304,16 +448,17 @@ blocklisted after an earlier failure."
            ;; Verified fresh already this session.
            ((and (gethash fkey latex-to-svg-backend--format-checked)
                  (file-exists-p fmt))
-            fmt)
-           ;; On disk and newer than the engine binary -> trust it.
+            (latex-to-svg-backend--touch-format fmt))
+           ;; On disk and dumped by this binary -> trust it.
            ((and (file-exists-p fmt)
                  (or (null latex-bin)
-                     (file-newer-than-file-p fmt latex-bin)))
+                     (latex-to-svg-backend--format-fresh-p fmt latex-bin)))
             (puthash fkey t latex-to-svg-backend--format-checked)
-            fmt)
+            (latex-to-svg-backend--touch-format fmt))
            ;; Missing or stale -> (re)build, if mylatexformat is available.
            ((latex-to-svg-backend--precompile-available-p)
             (delete-file fmt)
+            (delete-file (latex-to-svg-backend--format-stamp-file fmt))
             (if-let* ((built (latex-to-svg-backend--build-format fkey)))
                 (progn
                   (puthash fkey t latex-to-svg-backend--format-checked)
@@ -342,6 +487,7 @@ equation is not mistaken for a broken format."
     (puthash fkey t latex-to-svg-backend--format-blocklist)
     (remhash fkey latex-to-svg-backend--format-checked)
     (delete-file format-file)
+    (delete-file (latex-to-svg-backend--format-stamp-file format-file))
     (display-warning
      'latex-to-svg-backend
      "Precompiled LaTeX preamble failed; falling back to full compiles."
@@ -351,18 +497,18 @@ equation is not mistaken for a broken format."
 (defun latex-to-svg-backend-flush-format ()
   "Delete all precompiled preamble format files and forget them.
 
-Removes every `.fmt' in the cache `fmt/' subdirectory and clears this session's
-freshness and blocklist tracking, so the next render dumps a fresh
-format from the current preamble.  An escape hatch for a stale format
-the automatic freshness check missed — normally a TeX toolchain upgrade
-is handled on its own (the binary is newer than the `.fmt'), so this is
-rarely needed."
+Removes every `.fmt' in the cache `fmt/' subdirectory, with its stamp,
+and clears this session's freshness and blocklist tracking, so the next
+render dumps a fresh format from the current preamble.  An escape hatch
+for a stale format the automatic freshness check missed — normally a
+TeX toolchain upgrade is handled on its own (the stamp names another
+binary), so this is rarely needed."
   (interactive)
   (clrhash latex-to-svg-backend--format-checked)
   (clrhash latex-to-svg-backend--format-blocklist)
   (let ((dir (expand-file-name "fmt" (latex-to-svg-backend--cache-dir))))
     (when (file-directory-p dir)
-      (dolist (f (directory-files dir t "\\.fmt\\'"))
+      (dolist (f (directory-files dir t "\\.\\(?:fmt\\|eld\\)\\'"))
         (delete-file f)))))
 
 ;;;; Compile
@@ -417,11 +563,14 @@ is a disk problem, not the input's, and does not count."
            (and (re-search-forward "^! " nil t)
                 (not (looking-at-p "I can't write on file")))))))
 
-(defun latex-to-svg-backend--compile (key latex &optional metadata no-format)
+(defun latex-to-svg-backend--compile (key latex &optional metadata local no-format)
   "Asynchronously compile LATEX to the color-independent cache SVG for KEY.
 METADATA, when non-nil, is stored as the INITIAL value in KEY's `.eld'
 sidecar alongside the FINAL captured from the log (see
-`latex-to-svg-backend--write-metadata').
+`latex-to-svg-backend--write-metadata').  LOCAL is the text written
+after the preamble (see `latex-to-svg-backend--local-preamble'), nil
+meaning the current buffer's; the retry below passes it on, since it
+runs from the process sentinel, where the current buffer is another.
 
 LATEX is placed verbatim in the document body (the caller supplies
 valid body LaTeX and chooses inline vs display via delimiters).
@@ -451,6 +600,7 @@ re-tints from cache without recompiling."
          (tex (expand-file-name "equation.tex" dir))
          (dvi (expand-file-name "equation.dvi" dir))
          (svg (latex-to-svg-backend--svg-file key))
+         (local (or local (latex-to-svg-backend--local-preamble)))
          (format-file (and (not no-format) (latex-to-svg-backend--ensure-format)))
          (cleanup (lambda () (delete-directory dir t)))
          (output-buffer (generate-new-buffer
@@ -471,12 +621,21 @@ re-tints from cache without recompiling."
             ;; Load the precompiled preamble: the `%&' line must be first,
             ;; and names the format file by absolute path without its
             ;; `.fmt' extension.  The class + packages are already in the
-            ;; format, so only the document body is compiled here.
-            (insert "%& " (file-name-sans-extension format-file) "\n"
-                    "\\begin{document}\n"
-                    latex "\n"
-                    "\\end{document}\n")
+            ;; format, so they are not written here.
+            (progn
+              (insert "%& " (file-name-sans-extension format-file) "\n")
+              ;; The `.fmt' file was dumped by `mylatexformat', whose code
+              ;; it contains.  That code skips the lines up to its
+              ;; `\endofdump' command, else up to `\begin{document}',
+              ;; because a document's preamble is already in the `.fmt'
+              ;; file.  LOCAL is not, so it goes after an `\endofdump'.
+              (unless (string-empty-p local)
+                (insert "\\endofdump\n" local "\n"))
+              (insert "\\begin{document}\n"
+                      latex "\n"
+                      "\\end{document}\n"))
           (insert (latex-to-svg-backend--preamble) "\n"
+                  (if (string-empty-p local) "" (concat local "\n"))
                   "\\begin{document}\n"
                   ;; LATEX is inserted verbatim: it already carries its own
                   ;; math delimiters / environment (chosen by the
@@ -537,7 +696,7 @@ re-tints from cache without recompiling."
              (kill-buffer output-buffer))
            (funcall cleanup))
          (when retry-format
-           (latex-to-svg-backend--compile key latex metadata t)))))))
+           (latex-to-svg-backend--compile key latex metadata local t)))))))
 
 (provide 'latex-to-svg-backend-latex)
 
