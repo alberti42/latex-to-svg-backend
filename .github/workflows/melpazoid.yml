@@ -16,9 +16,7 @@ name: melpazoid
 
 on:  # yamllint disable-line rule:truthy
   push:
-    # `ratex' is the RaTeX engine's development branch; drop it once
-    # that work is merged.
-    branches: [main, ratex]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
