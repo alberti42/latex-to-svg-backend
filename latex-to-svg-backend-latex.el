@@ -57,7 +57,7 @@
   "LaTeX preamble (everything before `\\begin{document}') for equations.
 The `standalone' class crops the page tightly to the equation, so
 no `preview' package is required.  The `varwidth' option is what lets
-the verbatim body use *display* math — `\\[...\\]' and display
+the verbatim body use *display* math — `\\=\\[...\\=\\]' and display
 environments like `equation'/`align' — not just inline `$...$'
 \(plain `standalone' typesets its body as a single horizontal box and
 errors with \"Missing $ inserted\" on display math).  dvisvgm's
@@ -402,6 +402,21 @@ Called on a successful compile, before DIR is cleaned up."
           (file-error
            (latex-to-svg-backend--warn-once "writing compile metadata" err)))))))
 
+(defun latex-to-svg-backend--latex-formula-error-p (dir)
+  "Return non-nil when the log in scratch DIR shows LaTeX rejected the input.
+That is a `! ' error line in `equation.log', such as \"! Undefined control
+sequence.\" or \"! LaTeX Error: File `siunitx.sty' not found.\": compiling
+the same document again fails the same way.  \"! I can't write on file\"
+is a disk problem, not the input's, and does not count."
+  (let ((log (expand-file-name "equation.log" dir)))
+    (and (file-readable-p log)
+         (with-temp-buffer
+           (let ((coding-system-for-read 'raw-text))
+             (insert-file-contents log))
+           (goto-char (point-min))
+           (and (re-search-forward "^! " nil t)
+                (not (looking-at-p "I can't write on file")))))))
+
 (defun latex-to-svg-backend--compile (key latex &optional metadata no-format)
   "Asynchronously compile LATEX to the color-independent cache SVG for KEY.
 METADATA, when non-nil, is stored as the INITIAL value in KEY's `.eld'
@@ -422,9 +437,10 @@ otherwise the full preamble is embedded in the document.  On failure,
 if a format was used it may be the culprit: the format is abandoned (see
 `latex-to-svg-backend--block-format') and the same equation is retried once with
 the full inline preamble.  Only when a full-preamble compile fails is
-the log saved and a warning emitted (see `latex-to-svg-backend--compile-failed')
-and queued callbacks dropped.  NO-FORMAT forces that inline path (it is
-set on the retry).
+the failure handled (see `latex-to-svg-backend--compile-failed'): the log
+is saved, and when `latex' stopped on an error in the document (see
+`latex-to-svg-backend--latex-formula-error-p') the failure is recorded.
+NO-FORMAT forces that inline path (it is set on the retry).
 
 No color is baked in: the equation's default ink is emitted as the
 literal `currentColor' (dvisvgm `--currentcolor'), so the SVG is
@@ -495,7 +511,7 @@ re-tints from cache without recompiling."
                   svg
                   dvi)
             svg))
-     (lambda (success)
+     (lambda (success &optional exit)
        (let ((retry-format (and (not success) format-file)))
          (unwind-protect
              (cond
@@ -511,7 +527,10 @@ re-tints from cache without recompiling."
               (t
                (latex-to-svg-backend--compile-failed
                 key latex dir
-                (latex-to-svg-backend--process-output output-buffer))))
+                (latex-to-svg-backend--process-output output-buffer)
+                'latex
+                (and (eq (car exit) 'latex)
+                     (latex-to-svg-backend--latex-formula-error-p dir)))))
            (unless retry-format
              (remhash key latex-to-svg-backend--pending))
            (when (buffer-live-p output-buffer)

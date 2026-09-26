@@ -82,7 +82,7 @@ jobs:
   render:
     runs-on: ubuntu-latest
     name: Whole suite against a real Emacs, TeX toolchain and RaTeX
-    # Five tests skip in every job above.  Three build an image and so need
+    # Six tests skip in every job above.  Three build an image and so need
     # an Emacs with librsvg, which the nix builds behind setup-emacs are
     # not -- they are minimal by design, no image support and no window
     # system -- so this job takes Emacs from apt instead.  The fourth,
@@ -92,7 +92,8 @@ jobs:
     # varwidth + mylatexformat (latex-extra), xcolor (latex-recommended),
     # amssymb's fonts (fonts-recommended).  The fifth,
     # `latex-to-svg-backend-ratex-compile-end-to-end', needs RaTeX's
-    # `render-svg', which this job takes from a RaTeX release.
+    # `render-svg', which this job takes from a RaTeX release.  The sixth,
+    # `latex-to-svg-backend-fallback-end-to-end', needs both.
     steps:
       - uses: actions/checkout@v4
 

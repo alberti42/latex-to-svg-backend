@@ -235,16 +235,27 @@ on success, nil when OUTPUT has no SVG root element."
 
 ;;;; Compile
 
+(defun latex-to-svg-backend--ratex-formula-error-p (exit output)
+  "Return non-nil when RaTeX rejected the formula.
+EXIT is the failed stage and its exit status, as
+`latex-to-svg-backend--run-process-chain' reports it, and OUTPUT is what
+`render-svg' printed.  A formula RaTeX cannot parse exits with status 1
+and prints \"ERR <n> <formula> — Parse error: ...\"; a disk problem
+prints \"Failed to write SVG\" instead, and a panic aborts."
+  (and (equal exit '(ratex . 1))
+       (string-match-p "^ERR .* Parse error: " output)))
+
 (defun latex-to-svg-backend--ratex-compile (key latex)
   "Asynchronously render LATEX with RaTeX to the cache SVG for KEY.
 The formula (see `latex-to-svg-backend--ratex-formula') is written to a
 scratch directory, where `latex-to-svg-backend-ratex-program' renders it.
 On success the SVG is stored in the cache (see
 `latex-to-svg-backend--ratex-store') and every callback queued for KEY
-is notified (see `latex-to-svg-backend--enqueue').  On failure the log is
-saved and a warning emitted (see `latex-to-svg-backend--compile-failed')
-and the queued callbacks are dropped.  The scratch directory is removed
-either way.
+is notified (see `latex-to-svg-backend--enqueue').  On failure the
+failure is handled (see `latex-to-svg-backend--compile-failed'): the log
+is saved, and when RaTeX could not parse the formula (see
+`latex-to-svg-backend--ratex-formula-error-p') the failure is recorded.
+The scratch directory is removed either way.
 
 RaTeX emits no compile metadata, so no `.eld' sidecar is written."
   (pcase-let* ((`(,formula . ,inline) (latex-to-svg-backend--ratex-formula latex))
@@ -276,7 +287,7 @@ RaTeX emits no compile metadata, so no `.eld' sidecar is written."
                    "--color" latex-to-svg-backend--ratex-ink)
              (and inline '("--inline")))
             output))
-     (lambda (success)
+     (lambda (success &optional exit)
        (unwind-protect
            (if (and success
                     (condition-case err
@@ -293,9 +304,10 @@ RaTeX emits no compile metadata, so no `.eld' sidecar is written."
                                 (error-message-string err)))
                        nil)))
                (latex-to-svg-backend--notify-pending key)
-             (latex-to-svg-backend--compile-failed
-              key latex dir
-              (latex-to-svg-backend--process-output output-buffer)))
+             (let ((output (latex-to-svg-backend--process-output output-buffer)))
+               (latex-to-svg-backend--compile-failed
+                key latex dir output 'ratex
+                (latex-to-svg-backend--ratex-formula-error-p exit output))))
          (remhash key latex-to-svg-backend--pending)
          (when (buffer-live-p output-buffer)
            (kill-buffer output-buffer))

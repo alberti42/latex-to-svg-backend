@@ -159,14 +159,14 @@ In a running Emacs, load `dev/latex-to-svg-backend-benchmark.el` and call `M-x l
 ## API
 
 ```elisp
-(latex-to-svg-backend LATEX &key callback metadata engine rescale-by color background padding font-height)
+(latex-to-svg-backend LATEX &key callback metadata engine fallback quiet rescale-by color background padding font-height)
 ```
 
 `LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the backend is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
 
 Returns an image now when one can be produced synchronously (cache / on-disk SVG / placeholder), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile.
 
-`ENGINE` is `latex` (the default, also `nil`) or `ratex`; see [Engines](#engines). Any other value signals an error.
+`ENGINE` is `latex` (the default, also `nil`) or `ratex`; see [Engines](#engines). Any other value signals an error. `FALLBACK` names an engine that typesets `LATEX` when `ENGINE` rejects it, and `QUIET` drops the warning a failed compile gives; see [Failed compiles](#failed-compiles-and-the-fallback-engine).
 
 `RESCALE-BY` (default `1.0`) multiplies the display size of this one call on top of `latex-to-svg-backend-font-scale`. The backend has no inline/display awareness, so a front-end that wants display equations a touch larger than inline passes, say, `:rescale-by 1.1` for display and nothing for inline. It is a display-time scale only — same on-disk SVG, no recompile — and folds into the in-memory image cache key, so both sizes coexist. `METADATA` is documented under [Compile metadata](#compile-metadata-eld-sidecar) below.
 
@@ -194,8 +194,17 @@ Helpers a front-end typically needs for its refresh policy:
 | `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change; takes an optional `font-height` so it matches the render |
 | `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font; takes an optional `font-height`, and returns `nil` when no height is known (defer) |
 | `latex-to-svg-backend-foreground-color` | current tint color (`#rrggbb`) |
-| `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache; an optional second argument names the engine, as for `:engine` |
+| `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache, and the way to retry a failed compile; an optional second argument names the engine, as for `:engine` |
 | `latex-to-svg-backend-metadata` | read back compile metadata for a LaTeX body (see below), on cache hit or miss; an optional second argument names the engine |
+| `latex-to-svg-backend-engine-used` | `(latex-to-svg-backend-engine-used LATEX ENGINE FALLBACK)`: the engine whose picture a request with those arguments resolves to — `ENGINE`, `FALLBACK` when `ENGINE` failed, or `nil` when neither has a picture |
+
+### Failed compiles and the fallback engine
+
+When an engine rejects the formula — RaTeX cannot parse it, or LaTeX stops on an error in the document — the failure is recorded in the equation's `.eld` sidecar as `(:failed t)`, and a later request with the same `:engine` returns `nil` without compiling. A missing program, a crash or a killed process is not the formula's fault, so it is not recorded, and the next request compiles again. The record belongs to the cache key, so anything that changes the key retries on its own; `latex-to-svg-backend-invalidate` deletes the record for the rest (see [Troubleshooting](#troubleshooting)).
+
+A failed compile warns once per equation per buffer, naming the buffer and linking to the log. `:quiet t` drops that warning for the call; configuration problems (a missing program, an unwritable cache, a fallback without LaTeX) still warn. The backend has no option for it: a front-end owns the user's choice and passes it, as for `:engine`.
+
+`:fallback 'latex` typesets a formula `ENGINE` rejected with LaTeX instead, under LaTeX's own cache key, so a later request with the same `:engine` and `:fallback` returns LaTeX's picture from cache. The callbacks queued for the failed compile fire when LaTeX's SVG is ready. The same string must be valid LaTeX: a macro defined only in `latex-to-svg-backend-ratex-macros` fails in both engines. When `latex` or `dvisvgm` is missing, the backend warns once per session. The first fallback picture in a buffer is announced with a message such as `3 equations in notes.md fell back to LaTeX: RaTeX could not parse them`, since those pictures are typeset in LaTeX's style (Computer Modern) and RaTeX's in KaTeX's fonts. `latex-to-svg-backend-engine-used` tells a front-end which engine drew an image, for example for a tooltip.
 
 ### Compile metadata (`.eld` sidecar)
 
@@ -220,7 +229,7 @@ With `latex-to-svg-backend-metadata-prefix` set to `"L2S"`, a successful compile
 
 `(latex-to-svg-backend-metadata BODY)` returns that plist (or `nil` if absent/corrupt).  Here the block shows equation numbers `INITIAL`…`FINAL` (just `(7)`); `FINAL < INITIAL` means it produced none.
 
-For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg-backend BODY …)` with no `:metadata` and inject no `\typeout`. No sidecar is written and `(latex-to-svg-backend-metadata BODY)` returns `nil` — the whole mechanism is inert unless you opt in (and stays off entirely while `latex-to-svg-backend-metadata-prefix` is `nil`, its default). So `nil` is simply the normal answer for any un-probed equation; there is no "no number" sentinel to handle. `latex-to-svg-backend-invalidate` deletes the `.eld` with the SVG. `\typeout` has no visual effect, so the SVG is byte-identical to an un-probed one (only its content hash differs). Keep the emitted line short — TeX wraps log lines near column 80.
+For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg-backend BODY …)` with no `:metadata` and inject no `\typeout`. No sidecar is written and `(latex-to-svg-backend-metadata BODY)` returns `nil` — the whole mechanism is inert unless you opt in (and stays off entirely while `latex-to-svg-backend-metadata-prefix` is `nil`, its default). So `nil` is simply the normal answer for any un-probed equation; there is no "no number" sentinel to handle. `latex-to-svg-backend-invalidate` deletes the `.eld` with the SVG. The same file holds the record of a failed compile, `(:failed t)` (see [Failed compiles](#failed-compiles-and-the-fallback-engine)), for which `latex-to-svg-backend-metadata` returns `nil`. `\typeout` has no visual effect, so the SVG is byte-identical to an un-probed one (only its content hash differs). Keep the emitted line short — TeX wraps log lines near column 80.
 
 ### Sketch of a front-end
 
@@ -299,7 +308,7 @@ $XDG_CACHE_HOME/emacs/latex-to-svg/
 
 SVGs are **sharded** into 256 buckets under `svg/`, named by the first two hex characters of the content hash (`svg/ab/abcd….svg`, with the `.eld` sidecar and any compile `.log` alongside), so no single directory accumulates every equation.
 
-Stale entries are pruned by an **age-based garbage collector**. Each SVG's modification time is a last-use hint, bumped whenever the equation is (re)loaded, so `latex-to-svg-backend-gc` deletes only equations untouched for `latex-to-svg-backend-cache-max-age` days (default 90); a pruned one simply recompiles when next needed. GC runs automatically at most once per `latex-to-svg-backend-gc-interval` day (default 1), coordinated through an on-disk timestamp and an idle timer — so several sessions sharing the cache don't each run it, and a daemon left running for days still collects daily. Set `-gc-interval` to `nil` to disable automatic GC (you can still call it by hand), or `-cache-max-age` to `nil` to keep entries forever.
+Stale entries are pruned by an **age-based garbage collector**. Each SVG's modification time is a last-use hint, bumped whenever the equation is (re)loaded, so `latex-to-svg-backend-gc` deletes only equations untouched for `latex-to-svg-backend-cache-max-age` days (default 90); a pruned one simply recompiles when next needed. An entry with no SVG, left by a failed compile, is dated by its `.eld` failure record, else by its `.log`, and is collected the same way. GC runs automatically at most once per `latex-to-svg-backend-gc-interval` day (default 1), coordinated through an on-disk timestamp and an idle timer — so several sessions sharing the cache don't each run it, and a daemon left running for days still collects daily. Set `-gc-interval` to `nil` to disable automatic GC (you can still call it by hand), or `-cache-max-age` to `nil` to keep entries forever.
 
 Three interactive commands manage the cache directly:
 
@@ -355,6 +364,17 @@ If a compile fails, the backend warns with a clickable link to the LaTeX
 see exactly what TeX objected to. With the RaTeX engine the same link opens
 RaTeX's output, which names the command it could not parse (see
 [Engines](#engines) for what RaTeX does not support).
+
+A failure caused by the formula is recorded, and the equation is not compiled
+again (see [Failed compiles](#failed-compiles-and-the-fallback-engine)).
+Anything that changes the cache key retries on its own: editing the equation,
+`latex-to-svg-backend-preamble`, `latex-to-svg-backend-appended-preamble`,
+`latex-to-svg-backend-line-width`, or `latex-to-svg-backend-ratex-macros`. Two
+fixes do not change the key: installing a missing TeX package (a `\usepackage`
+for a `.sty` your TeX installation lacks makes every equation fail) and
+upgrading RaTeX. After those, regenerate the equations in the front-end
+(`C-u C-u C-c C-x C-l` in `latex-to-svg`), which calls
+`latex-to-svg-backend-invalidate`, or call it yourself.
 
 ## Tests
 

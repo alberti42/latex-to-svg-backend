@@ -22,8 +22,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `latex-to-svg-backend-ratex-macros`, macro definitions put in front of every
   formula RaTeX renders, in the Customize subgroup
   `latex-to-svg-backend-ratex`.
+- A failed compile caused by the formula (RaTeX cannot parse it, or LaTeX
+  stops on an error in the document) is recorded in the equation's `.eld`
+  sidecar as `(:failed t)`, and a later request with the same `:engine`
+  returns `nil` without compiling. A missing program, a crash or a killed
+  process is not recorded. `latex-to-svg-backend-invalidate` deletes the
+  record; `latex-to-svg-backend-metadata` returns `nil` for it.
+- A `:fallback` key on `latex-to-svg-backend`: nil (the default, no fallback)
+  or an engine, `latex`, that typesets a formula `:engine` rejected, under its
+  own cache key. The callbacks queued for the failed compile fire when the
+  fallback's SVG is ready. When `latex` or `dvisvgm` is missing, the backend
+  warns once per session. The first fallback picture in a buffer is
+  announced with a message naming how many equations fell back.
+- `latex-to-svg-backend-engine-used`, which returns the engine whose picture
+  a request resolves to: `:engine`, `:fallback` when `:engine` failed, or
+  `nil`.
+- A `:quiet` key on `latex-to-svg-backend` that drops the warning a failed
+  compile gives, for that call. Configuration problems still warn.
 
 ### Changed
+
+- A failed compile warns once per equation per buffer, and the warning names
+  the buffer and the engine; it warned on every failed compile before. The
+  backend records which buffer requested each compile for this.
+  `latex-to-svg-backend-invalidate` forgets the warning, so a failure that
+  remains is reported again.
 
 - In the documentation, "engine" now names the program that typesets an
   equation, LaTeX or RaTeX, and "backend" names this package. The released
@@ -45,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The buffer holding the log of the `.fmt` build is now
   `*latex-to-svg-backend-precompile-log*` (was
   `*latex-to-svg-backend-precompile*`).
+
+### Fixed
+
+- `latex-to-svg-backend-gc` collects entries with no SVG, which a failed
+  compile leaves: a `.log`, and now a `.eld` failure record. They were never
+  collected before.
+- `C-h f latex-to-svg-backend` and `C-h v latex-to-svg-backend-preamble`
+  showed the LaTeX delimiter `\[x\]` as `M-x x\`.
 
 ## [0.9.0] - 2026-09-09
 
