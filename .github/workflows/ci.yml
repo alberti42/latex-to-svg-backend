@@ -82,18 +82,16 @@ jobs:
   render:
     runs-on: ubuntu-latest
     name: Whole suite against a real Emacs, TeX toolchain and RaTeX
-    # Six tests skip in every job above.  Three build an image and so need
-    # an Emacs with librsvg, which the nix builds behind setup-emacs are
-    # not -- they are minimal by design, no image support and no window
-    # system -- so this job takes Emacs from apt instead.  The fourth,
-    # `latex-to-svg-backend-precompiled-compile-end-to-end', runs the real
-    # thing: latex, dvisvgm and a `.fmt' dump.  The TeX packages are what
-    # the default preamble and the precompilation need: standalone +
-    # varwidth + mylatexformat (latex-extra), xcolor (latex-recommended),
-    # amssymb's fonts (fonts-recommended).  The fifth,
-    # `latex-to-svg-backend-ratex-compile-end-to-end', needs RaTeX's
-    # `render-svg', which this job takes from a RaTeX release.  The sixth,
-    # `latex-to-svg-backend-fallback-end-to-end', needs both.
+    # Two kinds of test skip in every job above.  The tests that build an
+    # image need an Emacs with librsvg, which the nix builds behind
+    # setup-emacs are not -- they are minimal by design, no image support
+    # and no window system -- so this job takes Emacs from apt instead.
+    # The end-to-end tests run the real programs: latex, dvisvgm and a
+    # `.fmt' dump for the LaTeX engine, RaTeX's `render-svg' for the RaTeX
+    # one, and both for the fallback.  The TeX packages are what the
+    # default preamble and the precompilation need: standalone + varwidth +
+    # mylatexformat (latex-extra), xcolor (latex-recommended), amssymb's
+    # fonts (fonts-recommended).  `render-svg' comes from a RaTeX release.
     steps:
       - uses: actions/checkout@v4
 
@@ -122,8 +120,8 @@ jobs:
           command -v render-svg
 
       # The point of this job is that nothing in it skips.  An Emacs
-      # without SVG support would skip the three image tests silently, so
-      # fail here instead.
+      # without SVG support would skip the image tests silently, so fail
+      # here instead.
       - name: Check that this Emacs renders SVG
         run: |
           emacs -Q -batch --eval \
