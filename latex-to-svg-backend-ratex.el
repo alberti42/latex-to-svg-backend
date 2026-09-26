@@ -1,4 +1,4 @@
-;;; latex-to-svg-backend-ratex.el --- RaTeX renderer of latex-to-svg-backend -*- lexical-binding: t -*-
+;;; latex-to-svg-backend-ratex.el --- RaTeX engine of latex-to-svg-backend -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 Andrea Alberti
 
@@ -24,7 +24,7 @@
 
 ;;; Commentary:
 ;;
-;; The RaTeX renderer of `latex-to-svg-backend': it typesets an equation
+;; The RaTeX engine of `latex-to-svg-backend': it typesets an equation
 ;; with the `render-svg' program of RaTeX
 ;; <https://github.com/erweixin/RaTeX>, a math renderer written in Rust
 ;; that parses KaTeX's syntax and needs no TeX installation.  Load
@@ -35,7 +35,7 @@
 (require 'latex-to-svg-backend-core)
 
 (defgroup latex-to-svg-backend-ratex nil
-  "The RaTeX renderer of `latex-to-svg-backend': RaTeX's `render-svg'."
+  "The RaTeX engine of `latex-to-svg-backend': RaTeX's `render-svg'."
   :group 'latex-to-svg-backend
   :prefix "latex-to-svg-backend-")
 
@@ -72,8 +72,8 @@ The value is folded into the cache key, so changing it re-renders."
 ;;;; Cache key
 
 (defun latex-to-svg-backend--ratex-cache-salt ()
-  "Return the text the RaTeX renderer folds into the cache key.
-The renderer's name keeps its SVGs apart from the LaTeX renderer's, and
+  "Return the text the RaTeX engine folds into the cache key.
+The engine's name keeps its SVGs apart from the LaTeX engine's, and
 `latex-to-svg-backend-ratex-macros' is part of every formula."
   (concat "ratex\0" latex-to-svg-backend-ratex-macros))
 
@@ -81,7 +81,7 @@ The renderer's name keeps its SVGs apart from the LaTeX renderer's, and
 
 (defconst latex-to-svg-backend--ratex-delimiters
   '(("$$" "$$" nil) ("\\[" "\\]" nil) ("\\(" "\\)" t) ("$" "$" t))
-  "Math delimiters the RaTeX renderer removes, as (OPEN CLOSE INLINE).
+  "Math delimiters the RaTeX engine removes, as (OPEN CLOSE INLINE).
 RaTeX parses math only and rejects `\\(' and `\\['.  INLINE non-nil
 typesets the body in text style (`render-svg --inline'); a nil INLINE,
 and a formula with none of these delimiters (an `equation' environment,
@@ -126,10 +126,10 @@ the delimiter was an inline one."
 
 (defconst latex-to-svg-backend--ratex-ink "#010203"
   "Color RaTeX is told to draw the default ink in.
-RaTeX writes a color into every element it draws.  The renderer replaces
+RaTeX writes a color into every element it draws.  The engine replaces
 this one with `currentColor' (see `latex-to-svg-backend--ratex-svg'),
 which leaves the SVG color-independent, as dvisvgm's `--currentcolor'
-does for the LaTeX renderer.  A formula's own `\\color' keeps its color.")
+does for the LaTeX engine.  A formula's own `\\color' keeps its color.")
 
 (defconst latex-to-svg-backend--ratex-ink-svg "rgba(1,2,3,1)"
   "How RaTeX writes `latex-to-svg-backend--ratex-ink' in its SVG.")
@@ -143,7 +143,7 @@ does for the LaTeX renderer.  A formula's own `\\color' keeps its color.")
 
 (defun latex-to-svg-backend--ratex-ink-box (svg)
   "Return the box around the ink of RaTeX's SVG, as (X0 Y0 X1 Y1), or nil.
-dvisvgm's `--exact-bbox' crops the LaTeX renderer's SVGs to their ink.
+dvisvgm's `--exact-bbox' crops the LaTeX engine's SVGs to their ink.
 RaTeX sizes its SVG from the font metrics instead, so glyph overshoot
 falls outside the viewport and side bearings stay inside it.
 
@@ -197,7 +197,7 @@ The default ink, drawn in `latex-to-svg-backend--ratex-ink', becomes
 the ink (see `latex-to-svg-backend--ratex-ink-box') and in the form
 dvisvgm writes it -- width and height in pt, values in single quotes --
 which is the form `latex-to-svg-backend--pad-svg' reads.  One SVG unit
-is one pt, as in the LaTeX renderer's SVGs.  Nil when SVG has no root
+is one pt, as in the LaTeX engine's SVGs.  Nil when SVG has no root
 element."
   (when (string-match "<svg\\b[^>]*>" svg)
     (let* ((root-beg (match-beginning 0))
@@ -268,7 +268,7 @@ RaTeX emits no compile metadata, so no `.eld' sidecar is written."
                    "--input" input
                    "--output-dir" dir
                    ;; A 40-unit font at a device pixel ratio of 1/4 is a
-                   ;; 10pt em, the LaTeX renderer's body font, and `--dpr'
+                   ;; 10pt em, the LaTeX engine's body font, and `--dpr'
                    ;; scales the stroke widths with it.
                    "--font-size" "40"
                    "--dpr" "0.25"

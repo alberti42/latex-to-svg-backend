@@ -1,4 +1,4 @@
-;;; latex-to-svg-backend.el --- LaTeX-to-SVG rendering engine with caching -*- lexical-binding: t -*-
+;;; latex-to-svg-backend.el --- LaTeX-to-SVG rendering backend with caching -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 Andrea Alberti
 
@@ -25,9 +25,9 @@
 
 ;;; Commentary:
 ;;
-;; A small, buffer-agnostic engine that turns a LaTeX math string into an
+;; A small, buffer-agnostic backend that turns a LaTeX math string into an
 ;; SVG image suitable for overlaying in an Emacs buffer.  It is the
-;; rendering engine behind `agent-shell-math-renderer' (math in agent-shell's
+;; rendering backend behind `agent-shell-math-renderer' (math in agent-shell's
 ;; chat output) and the `latex-to-svg' preview stack (Org and Markdown).
 ;; A front-end finds the equations and places the images; the typesetting,
 ;; caching and sizing happen here.
@@ -39,11 +39,11 @@
 ;;     style).  Each unique equation therefore compiles at most once, and
 ;;     the cache is shared across every front-end.
 ;;
-;;   * A second renderer, RaTeX's `render-svg', needs no TeX installation
+;;   * A second engine, RaTeX's `render-svg', needs no TeX installation
 ;;     and typesets the math KaTeX supports; a caller chooses it per call
-;;     with `:renderer ratex'.  It produces the same color- and
+;;     with `:engine ratex'.  It produces the same color- and
 ;;     size-independent SVG; the `.fmt' precompilation and compile metadata
-;;     below are the LaTeX renderer's.
+;;     below are the LaTeX engine's.
 ;;
 ;;   * The on-disk SVG is COLOR-INDEPENDENT: dvisvgm `--currentcolor' emits
 ;;     the default ink as the literal token `currentColor', which is
@@ -72,13 +72,13 @@
 ;;
 ;; Public entry point:
 ;;
-;;   (latex-to-svg-backend LATEX &key callback metadata renderer rescale-by
+;;   (latex-to-svg-backend LATEX &key callback metadata engine rescale-by
 ;;                         color background padding font-height)
 ;;
 ;; LATEX is placed *verbatim* in the document body, so the caller passes
 ;; valid body LaTeX and decides inline vs display by the delimiters it uses
 ;; (`$x$', `\(x\)', `\[x\]', `\begin{equation}...\end{equation}', ...).
-;; The engine is deliberately unaware of that distinction.
+;; The backend is deliberately unaware of that distinction.
 ;;
 ;; Returns an image now when one can be produced synchronously (cache /
 ;; on-disk SVG / placeholder), else nil after scheduling an asynchronous
@@ -107,26 +107,26 @@
 (require 'latex-to-svg-backend-latex)
 (require 'latex-to-svg-backend-ratex)
 
-;;;; Renderer
+;;;; Engine
 
-(defun latex-to-svg-backend--renderer (renderer)
-  "Return RENDERER as `latex' or `ratex'; nil is `latex'.
-Signals an error for any other value: a misspelt renderer is a caller
+(defun latex-to-svg-backend--engine (engine)
+  "Return ENGINE as `latex' or `ratex'; nil is `latex'.
+Signals an error for any other value: a misspelt engine is a caller
 bug, and quietly falling back to LaTeX would hide it."
-  (pcase renderer
+  (pcase engine
     ('nil 'latex)
-    ((or 'latex 'ratex) renderer)
-    (_ (error "Unknown renderer %S: want `latex', `ratex' or nil" renderer))))
+    ((or 'latex 'ratex) engine)
+    (_ (error "Unknown engine %S: want `latex', `ratex' or nil" engine))))
 
 ;;;; Capability
 
-(defun latex-to-svg-backend-tools-available-p (&optional renderer)
-  "Return non-nil when the programs of RENDERER are found.
-RENDERER is `latex' (the default, also nil) or `ratex', as for
+(defun latex-to-svg-backend-tools-available-p (&optional engine)
+  "Return non-nil when the programs of ENGINE are found.
+ENGINE is `latex' (the default, also nil) or `ratex', as for
 `latex-to-svg-backend'.  The programs are looked up on the variable
-`exec-path': `latex' and `dvisvgm' for the LaTeX renderer, `render-svg'
+`exec-path': `latex' and `dvisvgm' for the LaTeX engine, `render-svg'
 for the RaTeX one."
-  (pcase (latex-to-svg-backend--renderer renderer)
+  (pcase (latex-to-svg-backend--engine engine)
     ('latex (latex-to-svg-backend--latex-tools-available-p))
     ('ratex (latex-to-svg-backend--ratex-tools-available-p))))
 
@@ -155,13 +155,13 @@ fresh.
 Do NOT tie this to the TeX/dvisvgm version — upgrading TeX Live should
 not wipe the cache.  Change it by hand, only for a real incompatibility.")
 
-(defun latex-to-svg-backend--cache-key (latex &optional renderer)
-  "Return a stable content cache key for LATEX rendered by RENDERER.
-RENDERER is `latex' (the default, also nil) or `ratex'; the caller has
-checked it (see `latex-to-svg-backend--renderer').
-The renderer's input besides LATEX is folded in so changing it
-invalidates the cache: the preamble for the LaTeX renderer (the key is
-the one it had before RaTeX was added), the renderer's name and
+(defun latex-to-svg-backend--cache-key (latex &optional engine)
+  "Return a stable content cache key for LATEX rendered by ENGINE.
+ENGINE is `latex' (the default, also nil) or `ratex'; the caller has
+checked it (see `latex-to-svg-backend--engine').
+The engine's input besides LATEX is folded in so changing it
+invalidates the cache: the preamble for the LaTeX engine (the key is
+the one it had before RaTeX was added), the engine's name and
 `latex-to-svg-backend-ratex-macros' for the RaTeX one.  So is
 `latex-to-svg-backend--cache-version', so a pipeline change re-keys warm
 caches.  LATEX is the verbatim document body, so any change to it —
@@ -173,17 +173,17 @@ display time), so neither size nor color is part of this key."
   (secure-hash 'sha1 (format "%d\0%s\0%s"
                              latex-to-svg-backend--cache-version
                              latex
-                             (pcase-exhaustive renderer
+                             (pcase-exhaustive engine
                                ((or 'nil 'latex) (latex-to-svg-backend--preamble))
                                ('ratex (latex-to-svg-backend--ratex-cache-salt))))))
 
 ;;;; Compile queue
 
-(defun latex-to-svg-backend--enqueue (key latex callback &optional metadata renderer)
+(defun latex-to-svg-backend--enqueue (key latex callback &optional metadata engine)
   "Queue CALLBACK for KEY and start a compile if none is running.
 
 KEY identifies the equation; LATEX is forwarded to the compile of
-RENDERER (`latex', the default, also nil, or `ratex'):
+ENGINE (`latex', the default, also nil, or `ratex'):
 `latex-to-svg-backend--compile', along with METADATA (the INITIAL value
 for the `.eld' sidecar), or `latex-to-svg-backend--ratex-compile', which
 writes no sidecar.
@@ -193,23 +193,23 @@ when it finishes."
   (let ((pending (gethash key latex-to-svg-backend--pending)))
     (puthash key (cons callback pending) latex-to-svg-backend--pending)
     (unless pending
-      (pcase-exhaustive renderer
+      (pcase-exhaustive engine
         ((or 'nil 'latex) (latex-to-svg-backend--compile key latex metadata))
         ('ratex (latex-to-svg-backend--ratex-compile key latex))))))
 
 ;;;; Public entry point
 
-(cl-defun latex-to-svg-backend (latex &key callback metadata renderer rescale-by color background padding font-height)
+(cl-defun latex-to-svg-backend (latex &key callback metadata engine rescale-by color background padding font-height)
   "Return an SVG image for LATEX, or nil while it compiles.
 
-RENDERER chooses the program that typesets LATEX.  `latex' (the
+ENGINE chooses the program that typesets LATEX.  `latex' (the
 default, also nil) runs `latex' and `dvisvgm' (options in the
 `latex-to-svg-backend-latex' group): full LaTeX, with any package the
 preamble loads, from a TeX installation.  `ratex' runs RaTeX's
 `render-svg' (options in the `latex-to-svg-backend-ratex' group): one
 program and no TeX installation, for the math KaTeX supports and no
-packages.  Any other value signals an error.  The renderer is part of
-the cache key, so each renderer's SVGs stay cached when a caller
+packages.  Any other value signals an error.  The engine is part of
+the cache key, so each engine's SVGs stay cached when a caller
 switches to the other.  As for COLOR, a front-end owns the user
 preference and passes it here.
 
@@ -217,15 +217,15 @@ METADATA, when non-nil and `latex-to-svg-backend-metadata-prefix' is set, is the
 INITIAL value stored in this equation's `.eld' sidecar (see
 `latex-to-svg-backend-metadata'); the FINAL value is captured from the compile
 log.  It is only recorded when a compile actually runs (a miss), and
-only by the LaTeX renderer.
+only by the LaTeX engine.
 
 RESCALE-BY (default 1.0) multiplies the base display size for this one
-call, on top of the global `latex-to-svg-backend-font-scale'.  The engine has no
-inline/display awareness; a front-end that wants display equations a
-touch larger than inline passes, say, `:rescale-by 1.1' for display and
-nothing for inline.  It is applied at display time only -- same on-disk SVG,
-no recompile — and folds into the in-memory image cache key, so the two
-sizes coexist.
+call, on top of the global `latex-to-svg-backend-font-scale'.  The
+backend has no inline/display awareness; a front-end that wants display
+equations a touch larger than inline passes, say, `:rescale-by 1.1' for
+display and nothing for inline.  It is applied at display time only --
+same on-disk SVG, no recompile — and folds into the in-memory image cache
+key, so the two sizes coexist.
 
 COLOR overrides the tint for this one call (a color string — `#rrggbb'
 or any name `color-name-to-rgb' understands); nil (the default) tints
@@ -240,7 +240,7 @@ BOTTOM LEFT) -- so (0 0 0 6) is a left gutter and nothing else.  Nil
 / 0 (the default) crops the box to the ink.  All apply
 at display time only -- same on-disk SVG, no recompile -- and fold
 into the in-memory image cache key, so tinted / boxed / padded
-variants coexist.  The engine has no tint policy of its own beyond
+variants coexist.  The backend has no tint policy of its own beyond
 following the buffer face; a front-end owns the user preference and
 passes it here.
 
@@ -250,7 +250,7 @@ front-end that knows the buffer's actual display frame measures
 which frame is selected.  When omitted, the selected frame is measured
 if graphical.  When no height is known (omitted and the selected frame
 is non-graphical -- e.g. an async/daemon render of a buffer shown
-nowhere), the engine still ensures the (size-independent) SVG is
+nowhere), the backend still ensures the (size-independent) SVG is
 compiled and cached, but returns nil instead of sizing against a guess:
 the caller re-queries once the buffer is displayed (where a trustworthy
 height exists) and the image is built then, from cache, with no
@@ -259,15 +259,15 @@ recompile.
 LATEX is placed *verbatim* in the LaTeX document body, so it must be
 valid there: pass math with its delimiters (`$x$', `\\(x\\)', `\\[x\\]')
 or a full environment (`\\begin{equation}...\\end{equation}').  The
-delimiters also choose inline vs display sizing — the engine does not.
-The RaTeX renderer has no document body: it removes the outer delimiter
+delimiters also choose inline vs display sizing — the backend does not.
+The RaTeX engine has no document body: it removes the outer delimiter
 and typesets in text style for `$x$' and `\\(x\\)', in display style
 otherwise (see `latex-to-svg-backend--ratex-delimiters').
 
 Returns immediately with:
 
   * the placeholder panel image, when `latex-to-svg-backend-use-placeholder'
-    is set or the renderer's programs are unavailable (see
+    is set or the engine's programs are unavailable (see
     `latex-to-svg-backend--placeholder');
   * the cached / on-disk equation image when it is ready;
   * nil when equations aren't renderable (see
@@ -281,14 +281,14 @@ it.  Concurrent requests for the same equation share one compile.
 
 The image is tinted to the current buffer foreground and scaled to
 the buffer font at build time, so call within the target buffer."
-  (setq renderer (latex-to-svg-backend--renderer renderer))
+  (setq engine (latex-to-svg-backend--engine engine))
   (when (latex-to-svg-backend-available-p)
     (cond
      ((or latex-to-svg-backend-use-placeholder
-          (not (latex-to-svg-backend-tools-available-p renderer)))
+          (not (latex-to-svg-backend-tools-available-p engine)))
       (latex-to-svg-backend--placeholder latex))
      (t
-      (let* ((key (latex-to-svg-backend--cache-key latex renderer))
+      (let* ((key (latex-to-svg-backend--cache-key latex engine))
              (compiled (file-exists-p (latex-to-svg-backend--svg-file key)))
              (image (and compiled
                          (latex-to-svg-backend--cached-image
@@ -303,11 +303,11 @@ the buffer font at build time, so call within the target buffer."
          ;; so it is ready when the buffer is later displayed; CALLBACK fires
          ;; on completion so the caller re-queries and sizes it then.
          (t (when callback
-              (latex-to-svg-backend--enqueue key latex callback metadata renderer))
+              (latex-to-svg-backend--enqueue key latex callback metadata engine))
             nil)))))))
 
 ;;;###autoload
-(defun latex-to-svg-backend-invalidate (latex &optional renderer)
+(defun latex-to-svg-backend-invalidate (latex &optional engine)
   "Forget any cached render of LATEX and force a recompile next time.
 
 Deletes LATEX's on-disk SVG (named after LATEX's content) and drops every
@@ -317,11 +317,11 @@ from a stale or corrupt cached SVG — ordinarily the content hash makes
 that impossible, so this is an escape hatch, not part of the normal
 flow.
 
-RENDERER is the renderer the render was made with, as for
-`latex-to-svg-backend': each renderer's SVG has its own cache entry, so
+ENGINE is the engine the render was made with, as for
+`latex-to-svg-backend': each engine's SVG has its own cache entry, so
 only that one is dropped."
   (let* ((key (latex-to-svg-backend--cache-key
-               latex (latex-to-svg-backend--renderer renderer)))
+               latex (latex-to-svg-backend--engine engine)))
          (file (latex-to-svg-backend--svg-file key))
          (meta (latex-to-svg-backend--meta-file key))
          (prefix (concat key "@"))
@@ -339,9 +339,9 @@ only that one is dropped."
       (remhash k latex-to-svg-backend--image-cache))))
 
 ;;;###autoload
-(defun latex-to-svg-backend-metadata (latex &optional renderer)
-  "Return cached compile metadata for LATEX rendered by RENDERER, or nil.
-RENDERER is as for `latex-to-svg-backend'.  Only the LaTeX renderer
+(defun latex-to-svg-backend-metadata (latex &optional engine)
+  "Return cached compile metadata for LATEX rendered by ENGINE, or nil.
+ENGINE is as for `latex-to-svg-backend'.  Only the LaTeX engine
 writes metadata, so this is always nil for `ratex'.
 
 Returns the plist `(:nums (INITIAL . FINAL))' read from LATEX's
@@ -356,8 +356,8 @@ the cached SVG would keep any compile from happening, so LATEX's whole
 cache entry is discarded (`latex-to-svg-backend-invalidate') and the next
 render rebuilds both the SVG and the sidecar.  Done at most once per
 equation per session."
-  (let* ((renderer (latex-to-svg-backend--renderer renderer))
-         (key (latex-to-svg-backend--cache-key latex renderer))
+  (let* ((engine (latex-to-svg-backend--engine engine))
+         (key (latex-to-svg-backend--cache-key latex engine))
          (file (latex-to-svg-backend--meta-file key)))
     (when (file-readable-p file)
       (condition-case err
@@ -370,7 +370,7 @@ equation per session."
           "discarding an unreadable metadata sidecar" err)
          (unless (gethash key latex-to-svg-backend--metadata-repaired)
            (puthash key t latex-to-svg-backend--metadata-repaired)
-           (latex-to-svg-backend-invalidate latex renderer))
+           (latex-to-svg-backend-invalidate latex engine))
          nil)
         ;; Not repairable by recompiling -- and the deletions that a repair
         ;; would attempt are exactly what is failing here.  Report it.

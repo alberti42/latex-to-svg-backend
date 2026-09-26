@@ -28,7 +28,7 @@
 ;; equation is typeset: the shared options, error reporting, colors,
 ;; sizing, cache addressing, the display image, the placeholder, the
 ;; process chain, the compile outcome and the cache garbage collector.
-;; The renderers live in `latex-to-svg-backend-latex' and
+;; The engines live in `latex-to-svg-backend-latex' and
 ;; `latex-to-svg-backend-ratex', the public entry point in
 ;; `latex-to-svg-backend'.  Load `latex-to-svg-backend', not this file.
 
@@ -99,7 +99,7 @@ buffer font across themes, faces, and text scale."
 
 (defcustom latex-to-svg-backend-use-placeholder nil
   "When non-nil, draw the placeholder panel instead of typesetting LaTeX.
-Also used as the automatic fallback when the programs of the renderer a
+Also used as the automatic fallback when the programs of the engine a
 call asks for are unavailable (see
 `latex-to-svg-backend-tools-available-p')."
   :type 'boolean
@@ -164,7 +164,7 @@ the same undisplayed SVG), which made preview sizing non-deterministic."
 
 ;; Conditions already reported by `latex-to-svg-backend--warn-once', keyed
 ;; "CONTEXT/ERROR-SYMBOL" and valued with the time they were reported.  An
-;; error the engine recovers from is never silent: the first of each kind
+;; error the backend recovers from is never silent: the first of each kind
 ;; warns, so a misconfiguration is diagnosable, while a recurring one does not
 ;; warn once per equation.
 (defvar latex-to-svg-backend--warned (make-hash-table :test 'equal)
@@ -187,7 +187,7 @@ cannot write reports once per collection attempt.")
 
 (defun latex-to-svg-backend--warn-once (context err &optional scope)
   "Report ERR under CONTEXT once, and return nil.
-For an error the engine recovers from: the recovery is reported rather than
+For an error the backend recovers from: the recovery is reported rather than
 silenced, but a recurring one does not warn per equation.  CONTEXT is a
 short phrase naming what failed, e.g. \"recording cache use\".
 
@@ -268,7 +268,7 @@ Both are `#rrggbb' strings resolved from the `default' face."
 (defun latex-to-svg-backend--font-height ()
   "Return the selected frame's default font pixel height, or nil.
 Nil off a graphical frame: there is nothing to measure there, and the
-engine deliberately does not search for another frame (a graphical frame
+backend deliberately does not search for another frame (a graphical frame
 in `frame-list' may be an invisible child frame).  Callers that know the
 buffer's real display frame measure it there and pass `:font-height'
 instead.
@@ -402,7 +402,7 @@ there and passes it, so sizing never depends on which frame happens to be
 selected.  Otherwise the selected frame is measured, but only when it is
 graphical (so a buffer-local text scale is honoured).  Returns nil when
 no height is known (no FONT-HEIGHT and a non-graphical selected frame,
-e.g. an async/daemon render of a buffer shown nowhere): the engine has
+e.g. an async/daemon render of a buffer shown nowhere): the backend has
 nothing trustworthy to size against, so the caller should defer building
 the display image until the buffer is shown -- the on-disk SVG is size-
 independent, so it can be compiled now and sized later with no recompile."
@@ -758,7 +758,7 @@ reported and does not keep the others from running."
   "Handle a failed LaTeX-to-SVG compile for KEY with source LATEX.
 DIR is the scratch directory containing equation.log when LaTeX
 created one.  PROCESS-OUTPUT is the captured stdout and stderr from
-the renderer's processes.  A persistent log containing the
+the engine's processes.  A persistent log containing the
 available diagnostics is written to the cache directory, and a
 warning is emitted with a clickable link to it.
 

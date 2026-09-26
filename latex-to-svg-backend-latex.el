@@ -1,4 +1,4 @@
-;;; latex-to-svg-backend-latex.el --- LaTeX renderer of latex-to-svg-backend -*- lexical-binding: t -*-
+;;; latex-to-svg-backend-latex.el --- LaTeX engine of latex-to-svg-backend -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 Andrea Alberti
 
@@ -24,7 +24,7 @@
 
 ;;; Commentary:
 ;;
-;; The LaTeX renderer of `latex-to-svg-backend': it compiles an equation
+;; The LaTeX engine of `latex-to-svg-backend': it compiles an equation
 ;; with `latex' + `dvisvgm' and precompiles the preamble to a LaTeX format
 ;; file (`.fmt').  Load `latex-to-svg-backend', not this file.
 
@@ -33,7 +33,7 @@
 (require 'latex-to-svg-backend-core)
 
 (defgroup latex-to-svg-backend-latex nil
-  "The LaTeX renderer of `latex-to-svg-backend': `latex' + `dvisvgm'."
+  "The LaTeX engine of `latex-to-svg-backend': `latex' + `dvisvgm'."
   :group 'latex-to-svg-backend
   :prefix "latex-to-svg-backend-")
 
@@ -119,7 +119,7 @@ re-reading the preamble, which speeds each compile up noticeably.
 
 Requires `mylatexformat.ltx' on the TeX search path (part of most TeX
 distributions).  When it is missing, or the dump fails, or a compile
-using the format later fails, the engine transparently falls back to
+using the format later fails, the backend transparently falls back to
 embedding the full preamble in each equation — correctness never depends
 on this option.  A stale format after a TeX toolchain upgrade is detected
 and rebuilt automatically (the binary is newer than the `.fmt');
@@ -154,7 +154,7 @@ short: TeX wraps log lines near column 80."
 ;; session, so the freshness (mtime) check runs at most once per key;
 ;; `--format-blocklist' records keys whose format produced a compile
 ;; failure, so precompilation is abandoned for them for the rest of the
-;; session and the engine falls back to full compiles.
+;; session and the backend falls back to full compiles.
 (defvar latex-to-svg-backend--format-checked (make-hash-table :test 'equal)
   "Format keys whose `.fmt' has been verified fresh this session.")
 
@@ -191,7 +191,7 @@ appended so the `varwidth' box uses that width (see that variable)."
 ;; Speedup: dump the preamble (class + packages) to a LaTeX format file once,
 ;; then load it from every equation compile with a `%&' first line instead of
 ;; re-reading and re-loading amsmath/xcolor/... each time.  Uses the
-;; `mylatexformat' package.  Entirely optional: on any hiccup the engine
+;; `mylatexformat' package.  Entirely optional: on any hiccup the backend
 ;; falls back to embedding the full preamble in each equation, so a `.fmt' is
 ;; a pure performance optimization, never a correctness dependency.
 
@@ -234,7 +234,7 @@ A `kpsewhich' that exits non-zero just means the package is not installed.
 A `kpsewhich' that cannot be started at all (moved by a toolchain upgrade
 mid-session) is a different matter: it is reported once
 \(`latex-to-svg-backend--warn-once') and treated as unavailable, so the
-engine falls back to full compiles."
+backend falls back to full compiles."
   (and (executable-find "kpsewhich")
        (eql 0 (condition-case err
                   (call-process "kpsewhich" nil nil nil "mylatexformat.ltx")
@@ -328,7 +328,7 @@ blocklisted after an earlier failure."
 (defun latex-to-svg-backend--block-format (format-file)
   "Abandon FORMAT-FILE and skip precompilation for its preamble this session.
 Deletes the `.fmt' (if any) and blocklists its key, so `--ensure-format'
-returns nil for this preamble for the rest of the session and the engine
+returns nil for this preamble for the rest of the session and the backend
 falls back to full compiles.  Warns once — one warning per preamble, since
 the blocklist short-circuits every later call.
 
@@ -443,7 +443,7 @@ re-tints from cache without recompiling."
     ;; 2018-04-01 release, so the encoding belongs here and not in an
     ;; `inputenc' line: adding a package to the preamble would rehash
     ;; `--cache-key' and the `.fmt' key, discarding every cached SVG and
-    ;; format for every user, to declare what the engine already writes.
+    ;; format for every user, to declare what the backend already writes.
     ;; Unpinned, an equation carrying a character the user's default coding
     ;; system cannot encode (an alpha under a Latin-1 language environment,
     ;; say) makes `write-region' *prompt* -- fatal in a background compile,

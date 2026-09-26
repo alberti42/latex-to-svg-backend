@@ -7,7 +7,7 @@
 [![CI](https://github.com/alberti42/latex-to-svg-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/alberti42/latex-to-svg-backend/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/github/license/alberti42/latex-to-svg-backend)](LICENSE)
 
-A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering engine behind [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) preview stack for Org and Markdown. A front-end does its own equation *detection* and image *placement*; the typesetting, caching and sizing is done by the banckend.
+A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering backend behind [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) preview stack for Org and Markdown. A front-end does its own equation *detection* and image *placement*; the typesetting, caching and sizing is done by the banckend.
 
 Used by [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) (Org/Markdown math preview) and [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) (math in `agent-shell` output); see [Related packages](#related-packages).
 
@@ -24,7 +24,7 @@ Equations are compiled once and then recolored and rescaled **without recompilin
 
 `latex-to-svg-backend` is a library, not a preview command: it turns one LaTeX string into one image and leaves *finding* equations and *placing* images to a front-end. Two front-ends are built on it today:
 
-- [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) — previews LaTeX math in **Org and Markdown** buffers (and other markups) as SVG. A shared front-end core (`latex-to-svg-frontend`) plus thin per-mode adaptors detect math with a blank-line-bounded scanner and overlay each occurrence with an SVG typeset here; because the engine renders its input verbatim, sizing follows from the delimiters. A drop-in replacement for built-in `org-latex-preview` that adds recolor-on-theme-switch and rescale-on-zoom straight from cache.
+- [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) — previews LaTeX math in **Org and Markdown** buffers (and other markups) as SVG. A shared front-end core (`latex-to-svg-frontend`) plus thin per-mode adaptors detect math with a blank-line-bounded scanner and overlay each occurrence with an SVG typeset here; because the backend renders its input verbatim, sizing follows from the delimiters. A drop-in replacement for built-in `org-latex-preview` that adds recolor-on-theme-switch and rescale-on-zoom straight from cache.
 - [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) — renders LaTeX math in [`agent-shell`](https://github.com/xenodium/agent-shell)'s streamed markdown output. Display and inline math in an agent's response are shown as theme-matched SVGs while the original LaTeX stays in the buffer, so copy and save round-trip renderable source. It uses this library for the typesetting.
 
 Because the cache is named after the equation's content, an equation that appears in both an Org buffer and an agent's chat compiles only once, shared across both.
@@ -42,26 +42,26 @@ Several other Emacs packages preview LaTeX for the user; a few do, under the hoo
 | [`org-xlatex`](https://github.com/ksqsf/org-xlatex) | MathJax/KaTeX → xwidget | Org + xwidgets | no | no | no | no |
 | [`latex-math-preview`](https://gitlab.com/latex-math-preview/latex-math-preview) | `latex`+`dvipng` → PNG | interactive command | no | no | no | no |
 
-¹ via the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end (the engine supplies the numbering metadata; the front-end assigns numbers and resolves `\ref` / `\eqref`). ² SVG output requires `preview-dvisvgm`.
+¹ via the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end (the backend supplies the numbering metadata; the front-end assigns numbers and resolves `\ref` / `\eqref`). ² SVG output requires `preview-dvisvgm`.
 
 What sets this stack apart is that it pulls together strengths that used to live in separate tools:
 
-- **Numbered equations + working `\ref` / `\eqref`** — the AUCTeX-based packages get these by compiling a whole `.tex`; here the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end assigns each block's numbers (folded in as a `\setcounter`) and reads the true counter back through the engine's compile-metadata sidecar, so every fragment still compiles alone.
+- **Numbered equations + working `\ref` / `\eqref`** — the AUCTeX-based packages get these by compiling a whole `.tex`; here the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end assigns each block's numbers (folded in as a `\setcounter`) and reads the true counter back through the backend's compile-metadata sidecar, so every fragment still compiles alone.
 - **Recolour + rescale from cache** — a theme switch, or a font/zoom change, updates previews with no LaTeX run; the others bake the colour and size into the image and must re-run LaTeX.
 - **Fast builds** — `.fmt` preamble precompilation (see [Preamble precompilation](#preamble-precompilation-fmt)).
-- **A shared, bare-string cache** — keyed by the equation's content and shared across front-ends and sessions, and the renderer takes a bare string, so it works outside a `.tex` document (for example, math in an agent's chat output).
+- **A shared, bare-string cache** — keyed by the equation's content and shared across front-ends and sessions, and the engine takes a bare string, so it works outside a `.tex` document (for example, math in an agent's chat output).
 
 The last two fall out of compiling each equation on its own and naming it by content.
 
 The closest relative is the in-progress next-generation `org-latex-preview` by tecosaur and karthink: it also caches a color-independent (`currentColor`) SVG that re-tints from cache on a theme change, and pioneered the `.fmt` preamble precompilation this library adopts (see [Preamble precompilation](#preamble-precompilation-fmt)). The difference is packaging — it ships as part of a patched Org branch and is Org-only, while `latex-to-svg-backend` is a standalone library any front-end (or a bare string, in any buffer) can call.
 
-Equation numbering used to be the gap: the AUCTeX-based packages compile a whole document, so `\ref` / `\eqref` and equation numbers come out right on their own, whereas here each fragment is compiled alone. The [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end closes it — it scans the buffer to assign each block's numbers (folded into the fragment as a `\setcounter`), reads the true final counter back through the engine's compile-metadata sidecar, and renders `\ref` / `\eqref` as the resolved number with click-to-jump. To our knowledge, this is the only stack that combines numbered equations **and** working `\ref` / `\eqref` links **and** `.fmt` precompilation **and** recolour/rescale from cache: the tecosaur/karthink fork has `.fmt` and cache-recolour but only partial numbering and no full cross-references, while the AUCTeX packages have numbering and references but no `.fmt` and no cache-recolour.
+Equation numbering used to be the gap: the AUCTeX-based packages compile a whole document, so `\ref` / `\eqref` and equation numbers come out right on their own, whereas here each fragment is compiled alone. The [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end closes it — it scans the buffer to assign each block's numbers (folded into the fragment as a `\setcounter`), reads the true final counter back through the backend's compile-metadata sidecar, and renders `\ref` / `\eqref` as the resolved number with click-to-jump. To our knowledge, this is the only stack that combines numbered equations **and** working `\ref` / `\eqref` links **and** `.fmt` precompilation **and** recolour/rescale from cache: the tecosaur/karthink fork has `.fmt` and cache-recolour but only partial numbering and no full cross-references, while the AUCTeX packages have numbering and references but no `.fmt` and no cache-recolour.
 
 ## Requirements
 
 - Emacs 29.1+ with SVG image support.
-- The programs of one of the two [renderers](#renderers) on `exec-path`:
-  - LaTeX (the default): `latex` and `dvisvgm`, from any TeX distribution. Optionally the `mylatexformat` package (`mylatexformat.ltx`, bundled with most TeX distributions) for preamble precompilation. Absent, the engine simply skips the speedup — see [Preamble precompilation](#preamble-precompilation-fmt).
+- The programs of one of the two [engines](#engines) on `exec-path`:
+  - LaTeX (the default): `latex` and `dvisvgm`, from any TeX distribution. Optionally the `mylatexformat` package (`mylatexformat.ltx`, bundled with most TeX distributions) for preamble precompilation. Absent, the backend simply skips the speedup — see [Preamble precompilation](#preamble-precompilation-fmt).
   - RaTeX: its `render-svg` program. No TeX installation.
 
   Without them, a placeholder panel boxing the raw LaTeX is shown instead (or set `latex-to-svg-backend-use-placeholder`).
@@ -103,35 +103,35 @@ The package (feature) is `latex-to-svg-backend`, and so is the recipe *name*
 (the feature you `require`); the repository is
 **`alberti42/latex-to-svg-backend`**.
 
-## Renderers
+## Engines
 
-The `:renderer` argument of `latex-to-svg-backend` chooses the program that typesets an equation:
+The `:engine` argument of `latex-to-svg-backend` chooses the program that typesets an equation:
 
 - **`latex`** (the default, also `nil`) runs `latex` and `dvisvgm`. It is full LaTeX: any package the preamble loads, any macro it defines.
 - **`ratex`** runs `render-svg` from [RaTeX](https://github.com/erweixin/RaTeX), a math renderer written in Rust that parses KaTeX's syntax. It is one program and needs no TeX installation, but it typesets only the math KaTeX supports, and it loads no packages.
 
-Both produce the same color- and size-independent SVG, cropped to the ink, so everything under [API](#api) works the same with either. The renderer is part of the cache key, so each renderer's SVGs stay cached when a caller switches to the other.
+Both produce the same color- and size-independent SVG, cropped to the ink, so everything under [API](#api) works the same with either. The engine is part of the cache key, so each engine's SVGs stay cached when a caller switches to the other.
 
-The renderer is chosen per call, like `:color`: a front-end owns the user's choice and passes it. The backend has no option for it. A caller that passes no `:renderer`, such as [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) today, gets the LaTeX renderer. The [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end does not offer RaTeX yet.
+The engine is chosen per call, like `:color`: a front-end owns the user's choice and passes it. The backend has no option for it. A caller that passes no `:engine`, such as [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) today, gets the LaTeX engine. In the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end, `latex-to-svg-frontend-engine` chooses it, also as a file- or directory-local variable, and a comment at the top of a display equation (`% engine=ratex`) chooses the engine for that equation or skips it; see that package's README.
 
 To use RaTeX, download the archive for your system from the [RaTeX releases](https://github.com/erweixin/RaTeX/releases) (`ratex-cli-<version>-<target>.tar.gz`) and put its `render-svg` on `exec-path`, or set `latex-to-svg-backend-ratex-program` to its path. A front-end then asks for it:
 
 ```elisp
-(latex-to-svg-backend "$x^2$" :renderer 'ratex :callback #'my-refresh)
+(latex-to-svg-backend "$x^2$" :engine 'ratex :callback #'my-refresh)
 ```
 
 What changes with RaTeX, from RaTeX v0.1.14:
 
 - **No preamble.** RaTeX parses one formula at a time. `latex-to-svg-backend-ratex-macros` is put in front of every formula, so `\newcommand`, `\renewcommand` and `\def` there apply to every equation. `\newcommand` signals an error for a name RaTeX already defines (`\R`, `\ket`, …); use `\renewcommand` or `\def` for those.
 - **No packages.** A command KaTeX does not have fails with *Undefined control sequence*: siunitx's `\SI` and `\unit`, `\DeclareMathOperator` (use `\operatorname`), `\label`, `\setcounter`. mhchem's `\ce` and `\pu` are built in.
-- **Delimiters.** RaTeX rejects `\(` and `\[`, so the engine removes the outer `$…$`, `\(…\)`, `$$…$$` or `\[…\]` and typesets in text style for the first two and in display style otherwise. An environment (`\begin{align}…`) is passed as is. `%` comments are removed and the lines joined, because `render-svg` reads one formula per line.
-- **Numbering.** Each `equation` or `align` is numbered from (1), `\notag` works, and `\tag{N}` sets a number. There is no counter to set and no compile metadata, so `:metadata` is ignored and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end's numbering does not work with RaTeX yet.
+- **Delimiters.** RaTeX rejects `\(` and `\[`, so the backend removes the outer `$…$`, `\(…\)`, `$$…$$` or `\[…\]` and typesets in text style for the first two and in display style otherwise. An environment (`\begin{align}…`) is passed as is. `%` comments are removed and the lines joined, because `render-svg` reads one formula per line.
+- **Numbering.** Each `equation` or `align` is numbered from (1), `\notag` works, and `\tag{N}` sets a number. There is no counter to set and no compile metadata, so `:metadata` is ignored. The [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end numbers equations with RaTeX by putting `\tag{N}` on each numbered row and removing every `\label` from what RaTeX receives.
 - **Look.** The glyphs are KaTeX's fonts, and the layout is RaTeX's implementation of KaTeX's, so it can differ from TeX's in detail. Text in `\text{}` that the KaTeX fonts lack is drawn in a system font.
 - **Speed.** A new equation compiles in 6–7 ms instead of 313–316 ms (medians); see [Benchmark](#benchmark).
 
 ## Benchmark
 
-The time to compile a new equation, with each renderer, for the 20 equations in [`dev/latex-to-svg-backend-benchmark.el`](dev/latex-to-svg-backend-benchmark.el) (inline and display math, `equation`, `align`, matrices, `cases`). Every run starts from an empty cache, so every equation compiles. A cached equation costs the same with either renderer, because neither runs: showing it again, a theme switch and a font change are all cache hits.
+The time to compile a new equation, with each engine, for the 20 equations in [`dev/latex-to-svg-backend-benchmark.el`](dev/latex-to-svg-backend-benchmark.el) (inline and display math, `equation`, `align`, matrices, `cases`). Every run starts from an empty cache, so every equation compiles. A cached equation costs the same with either engine, because neither runs: showing it again, a theme switch and a font change are all cache hits.
 
 | | LaTeX (`latex` + `dvisvgm`, `.fmt`) | RaTeX (`render-svg`) |
 | --- | ---: | ---: |
@@ -159,16 +159,16 @@ In a running Emacs, load `dev/latex-to-svg-backend-benchmark.el` and call `M-x l
 ## API
 
 ```elisp
-(latex-to-svg-backend LATEX &key callback metadata renderer rescale-by color background padding font-height)
+(latex-to-svg-backend LATEX &key callback metadata engine rescale-by color background padding font-height)
 ```
 
-`LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the engine is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
+`LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the backend is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
 
 Returns an image now when one can be produced synchronously (cache / on-disk SVG / placeholder), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile.
 
-`RENDERER` is `latex` (the default, also `nil`) or `ratex`; see [Renderers](#renderers). Any other value signals an error.
+`ENGINE` is `latex` (the default, also `nil`) or `ratex`; see [Engines](#engines). Any other value signals an error.
 
-`RESCALE-BY` (default `1.0`) multiplies the display size of this one call on top of `latex-to-svg-backend-font-scale`. The engine has no inline/display awareness, so a front-end that wants display equations a touch larger than inline passes, say, `:rescale-by 1.1` for display and nothing for inline. It is a display-time scale only — same on-disk SVG, no recompile — and folds into the in-memory image cache key, so both sizes coexist. `METADATA` is documented under [Compile metadata](#compile-metadata-eld-sidecar) below.
+`RESCALE-BY` (default `1.0`) multiplies the display size of this one call on top of `latex-to-svg-backend-font-scale`. The backend has no inline/display awareness, so a front-end that wants display equations a touch larger than inline passes, say, `:rescale-by 1.1` for display and nothing for inline. It is a display-time scale only — same on-disk SVG, no recompile — and folds into the in-memory image cache key, so both sizes coexist. `METADATA` is documented under [Compile metadata](#compile-metadata-eld-sidecar) below.
 
 `COLOR` and `BACKGROUND` override, for this one call, the tint and the box color (both color strings — `#rrggbb` or any name `color-name-to-rgb` understands). `COLOR` defaults to the buffer foreground (`latex-to-svg-backend-foreground-color`), which tracks the theme; `BACKGROUND` defaults to `nil` = transparent, so equations blend into the buffer. `PADDING` grows the `BACKGROUND` box beyond the ink — the SVG viewport is enlarged and a filled `<rect>` baked in — and scales with the equation; `nil` / `0` crops the box to the ink. It is either a number of pt, applied to all four sides, or a list of one to four numbers read in **CSS order**:
 
@@ -179,9 +179,9 @@ Returns an image now when one can be produced synchronously (cache / on-disk SVG
 | `(2 6 4)` | top, horizontal, bottom |
 | `(2 6 4 8)` | top, right, bottom, left |
 
-So a left gutter and nothing else is `:padding '(0 0 0 6)`. Each dimension grows by the sum of its two sides and the origin shifts by the left/top ones, so the ink stays put relative to the sides that were not padded. A malformed spec (wrong length, a non-number, a negative side) signals an error rather than silently rendering an unpadded box. Like `RESCALE-BY` they apply at display time only — same on-disk SVG, no recompile — and fold into the image cache key so variants coexist. The engine has no tint policy of its own beyond following the buffer face: a front-end owns any user-facing “fixed color” / “boxed equation” preference and passes it here.
+So a left gutter and nothing else is `:padding '(0 0 0 6)`. Each dimension grows by the sum of its two sides and the origin shifts by the left/top ones, so the ink stays put relative to the sides that were not padded. A malformed spec (wrong length, a non-number, a negative side) signals an error rather than silently rendering an unpadded box. Like `RESCALE-BY` they apply at display time only — same on-disk SVG, no recompile — and fold into the image cache key so variants coexist. The backend has no tint policy of its own beyond following the buffer face: a front-end owns any user-facing “fixed color” / “boxed equation” preference and passes it here.
 
-`FONT-HEIGHT` (pixels) is the buffer font height to size against. A front-end that knows the buffer's actual display frame measures `default-font-height` there and passes it, so sizing never depends on which frame happens to be selected (e.g. an async callback while a TTY/daemon frame is current). When omitted, the selected frame is measured if it is graphical. When **no** height is known (omitted *and* the selected frame is non-graphical — a background/daemon render of a buffer shown in no window), the engine still ensures the size-independent SVG is compiled and cached, but returns `nil` rather than sizing against a guess — the front-end re-queries once the buffer is displayed (its display hook already does this for theme/font changes) and the image is built then, from cache, with no recompile. The `latex` → `dvisvgm` **compile** never needs a frame; only building the display image does.
+`FONT-HEIGHT` (pixels) is the buffer font height to size against. A front-end that knows the buffer's actual display frame measures `default-font-height` there and passes it, so sizing never depends on which frame happens to be selected (e.g. an async callback while a TTY/daemon frame is current). When omitted, the selected frame is measured if it is graphical. When **no** height is known (omitted *and* the selected frame is non-graphical — a background/daemon render of a buffer shown in no window), the backend still ensures the size-independent SVG is compiled and cached, but returns `nil` rather than sizing against a guess — the front-end re-queries once the buffer is displayed (its display hook already does this for theme/font changes) and the image is built then, from cache, with no recompile. The `latex` → `dvisvgm` **compile** never needs a frame; only building the display image does.
 
 The image is tinted to the current buffer foreground and scaled to the buffer font at build time, so call it within the target buffer.
 
@@ -190,16 +190,16 @@ Helpers a front-end typically needs for its refresh policy:
 | Function | Purpose |
 | --- | --- |
 | `latex-to-svg-backend-available-p` | SVG build support + graphical (or non-graphic opt-in) |
-| `latex-to-svg-backend-tools-available-p` | the programs of a renderer on `exec-path`: `latex` + `dvisvgm`, or `render-svg` with the argument `ratex` |
+| `latex-to-svg-backend-tools-available-p` | the programs of an engine on `exec-path`: `latex` + `dvisvgm`, or `render-svg` with the argument `ratex` |
 | `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change; takes an optional `font-height` so it matches the render |
 | `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font; takes an optional `font-height`, and returns `nil` when no height is known (defer) |
 | `latex-to-svg-backend-foreground-color` | current tint color (`#rrggbb`) |
-| `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache; an optional second argument names the renderer, as for `:renderer` |
-| `latex-to-svg-backend-metadata` | read back compile metadata for a LaTeX body (see below), on cache hit or miss; an optional second argument names the renderer |
+| `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache; an optional second argument names the engine, as for `:engine` |
+| `latex-to-svg-backend-metadata` | read back compile metadata for a LaTeX body (see below), on cache hit or miss; an optional second argument names the engine |
 
 ### Compile metadata (`.eld` sidecar)
 
-A compile can pair a value the caller already knows with a number the *compile* produces, and cache the pair next to the SVG — so a front-end can read it back **without recompiling** (e.g. the range of equation numbers a block shows). It is opt-in and the engine stays unaware of what the numbers mean.
+A compile can pair a value the caller already knows with a number the *compile* produces, and cache the pair next to the SVG — so a front-end can read it back **without recompiling** (e.g. the range of equation numbers a block shows). It is opt-in and the backend stays unaware of what the numbers mean.
 
 The division of labour: the caller passes what it knows (`INITIAL`) as a Lisp value via `:metadata`; only the thing the compile computes (`FINAL`) travels through LaTeX, `\typeout`-ed on a line beginning with `latex-to-svg-backend-metadata-prefix`:
 
@@ -238,9 +238,9 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 
 ## Customization
 
-`M-x customize-group RET latex-to-svg-backend` shows the options of both renderers, with those of each renderer in its own subgroup (`latex-to-svg-backend-latex`, `latex-to-svg-backend-ratex`). Which renderer each option and command belongs to (the `latex-to-svg-backend-` prefix is left out):
+`M-x customize-group RET latex-to-svg-backend` shows the options of both engines, with those of each engine in its own subgroup (`latex-to-svg-backend-latex`, `latex-to-svg-backend-ratex`). Which engine each option and command belongs to (the `latex-to-svg-backend-` prefix is left out):
 
-| Both renderers | LaTeX only | RaTeX only |
+| Both engines | LaTeX only | RaTeX only |
 | --- | --- | --- |
 | `-cache-directory` | `-latex-program` | `-ratex-program` |
 | `-cache-max-age` | `-dvisvgm-program` | `-ratex-macros` |
@@ -251,7 +251,7 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 | `-svg-dpi` | `-precompile` | |
 | `M-x …-gc`, `…-clear-cache`, `…-invalidate` | `M-x …-flush-format` | |
 
-There is no option for the renderer: the caller chooses it per call (see [Renderers](#renderers)).
+There is no option for the engine: the caller chooses it per call (see [Engines](#engines)).
 
 The functions under [API](#api) work with both; `latex-to-svg-backend-metadata` returns `nil` for an equation RaTeX rendered.
 
@@ -311,9 +311,9 @@ Three interactive commands manage the cache directly:
 
 ### Preamble precompilation (`.fmt`)
 
-Every equation is its own tiny LaTeX document, so each compile re-reads the class and every package in the preamble (`amsmath`, `xcolor`, and whatever you add via `latex-to-svg-backend-appended-preamble`). That parsing dominates the runtime of a small equation. With `latex-to-svg-backend-precompile` (default `t`) the engine dumps the preamble **once** to a LaTeX format file (`.fmt`) using the [`mylatexformat`](https://ctan.org/pkg/mylatexformat) package, keyed by the preamble text, and every equation compile then loads it via a `%&` first line instead of re-parsing the packages — typically **25–40% faster per equation**, more with a heavier preamble.
+Every equation is its own tiny LaTeX document, so each compile re-reads the class and every package in the preamble (`amsmath`, `xcolor`, and whatever you add via `latex-to-svg-backend-appended-preamble`). That parsing dominates the runtime of a small equation. With `latex-to-svg-backend-precompile` (default `t`) the backend dumps the preamble **once** to a LaTeX format file (`.fmt`) using the [`mylatexformat`](https://ctan.org/pkg/mylatexformat) package, keyed by the preamble text, and every equation compile then loads it via a `%&` first line instead of re-parsing the packages — typically **25–40% faster per equation**, more with a heavier preamble.
 
-It is a pure optimization with a graceful fallback: when `mylatexformat.ltx` isn't on the TeX search path, or the dump fails, or a compile that used the format later fails, the engine transparently reverts to embedding the full preamble. A stale format after a TeX toolchain upgrade is detected (the LaTeX binary is newer than the `.fmt`) and rebuilt automatically; `M-x latex-to-svg-backend-flush-format` is the manual escape hatch. Set `latex-to-svg-backend-precompile` to `nil` to disable it entirely.
+It is a pure optimization with a graceful fallback: when `mylatexformat.ltx` isn't on the TeX search path, or the dump fails, or a compile that used the format later fails, the backend transparently reverts to embedding the full preamble. A stale format after a TeX toolchain upgrade is detected (the LaTeX binary is newer than the `.fmt`) and rebuilt automatically; `M-x latex-to-svg-backend-flush-format` is the manual escape hatch. Set `latex-to-svg-backend-precompile` to `nil` to disable it entirely.
 
 The `%&`-loaded `.fmt` approach is borrowed from the work of Karthik Chikmagalur (karthink) and TEC (tecosaur) on fast Org math preview. It started as karthink's proof-of-concept [`org-preview`](https://github.com/karthink/org-preview) (now archived); the `.fmt`-based `org-latex-preview` it grew into lives in a [fork of Org mode](https://code.tecosaur.net/tec/org-mode.git) and is not part of upstream Org.
 
@@ -350,11 +350,11 @@ re-renders. A few common cases:
   sequence`) — load the package that provides it (or define the macro) via
   `latex-to-svg-backend-appended-preamble`.
 
-If a compile fails, the engine warns with a clickable link to the LaTeX
+If a compile fails, the backend warns with a clickable link to the LaTeX
 `.log` (kept next to the cached SVG under `svg/`), which is the fastest way to
-see exactly what TeX objected to. With the RaTeX renderer the same link opens
+see exactly what TeX objected to. With the RaTeX engine the same link opens
 RaTeX's output, which names the command it could not parse (see
-[Renderers](#renderers) for what RaTeX does not support).
+[Engines](#engines) for what RaTeX does not support).
 
 ## Tests
 

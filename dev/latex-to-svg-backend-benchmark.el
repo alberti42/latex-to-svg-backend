@@ -1,4 +1,4 @@
-;;; latex-to-svg-backend-benchmark.el --- Time the two renderers -*- lexical-binding: t -*-
+;;; latex-to-svg-backend-benchmark.el --- Time the two engines -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 Andrea Alberti
 
@@ -9,7 +9,7 @@
 
 ;;; Commentary:
 ;;
-;; Compiles the same equations with the LaTeX and the RaTeX renderer and
+;; Compiles the same equations with the LaTeX and the RaTeX engine and
 ;; reports how long they take.  Each run uses a fresh temporary cache
 ;; directory, so every equation really compiles; the user's cache is not
 ;; touched.  Run it from a checkout:
@@ -50,7 +50,7 @@
     "\\[f(x)=\\begin{cases}1&x>0\\\\0&x\\le 0\\end{cases}\\]"
     "\\begin{equation}\nF = ma\n\\end{equation}"
     "\\begin{align}\na&=b+c\\\\\nd&=e+f\n\\end{align}")
-  "Equations the benchmark compiles; both renderers accept all of them.")
+  "Equations the benchmark compiles; both engines accept all of them.")
 
 (defun latex-to-svg-backend-benchmark--wait (pred timeout)
   "Process output until PRED returns non-nil or TIMEOUT seconds pass."
@@ -58,8 +58,8 @@
     (while (and (not (funcall pred)) (< (float-time) end))
       (accept-process-output nil 0.005))))
 
-(defun latex-to-svg-backend-benchmark--run (renderer mode)
-  "Compile every equation with RENDERER in MODE and return the timings.
+(defun latex-to-svg-backend-benchmark--run (engine mode)
+  "Compile every equation with ENGINE in MODE and return the timings.
 MODE `sequential' compiles one equation, waits for its callback and
 starts the next; `batch' queues all of them at once, as a front-end does
 for a buffer, and times until the last is done.  Everything runs inside
@@ -77,17 +77,17 @@ temporary cache directory."
          fmt-time times (done 0) wall)
     (unwind-protect
         (progn
-          (when (eq renderer 'latex)
+          (when (eq engine 'latex)
             (let ((start (float-time)))
               (latex-to-svg-backend--ensure-format)
               (setq fmt-time (- (float-time) start))))
           (pcase mode
             ('sequential
              (dolist (equation equations)
-               (let ((key (latex-to-svg-backend--cache-key equation renderer))
+               (let ((key (latex-to-svg-backend--cache-key equation engine))
                      (ok nil)
                      (start (float-time)))
-                 (latex-to-svg-backend equation :renderer renderer
+                 (latex-to-svg-backend equation :engine engine
                                        :callback (lambda () (setq ok t)))
                  (latex-to-svg-backend-benchmark--wait
                   (lambda () (or ok (not (gethash key pending)))) 30)
@@ -96,18 +96,18 @@ temporary cache directory."
                    (push (- (float-time) start) times)))))
             ('batch
              (let ((keys (mapcar (lambda (equation)
-                                   (latex-to-svg-backend--cache-key equation renderer))
+                                   (latex-to-svg-backend--cache-key equation engine))
                                  equations))
                    (start (float-time)))
                (dolist (equation equations)
-                 (latex-to-svg-backend equation :renderer renderer
+                 (latex-to-svg-backend equation :engine engine
                                        :callback (lambda () (cl-incf done))))
                (latex-to-svg-backend-benchmark--wait
                 (lambda () (seq-every-p (lambda (k) (not (gethash k pending))) keys))
                 120)
                (setq wall (- (float-time) start))))))
       (delete-directory dir t))
-    (list :renderer renderer :mode mode :done done :total (length equations)
+    (list :engine engine :mode mode :done done :total (length equations)
           :fmt fmt-time :times (nreverse times) :wall wall)))
 
 (defun latex-to-svg-backend-benchmark--ms (seconds)
@@ -120,7 +120,7 @@ temporary cache directory."
          (sorted (sort (copy-sequence (plist-get run :times)) #'<))
          (n (length sorted)))
     (format "%-5s %-10s ok %2d/%2d  %s%s"
-            (plist-get run :renderer) (plist-get run :mode)
+            (plist-get run :engine) (plist-get run :mode)
             (plist-get run :done) (plist-get run :total)
             (if-let* ((wall (plist-get run :wall)))
                 (format "total %5d ms  (%d ms per equation)"
@@ -135,14 +135,14 @@ temporary cache directory."
               ""))))
 
 (defun latex-to-svg-backend-benchmark-report (&optional rounds)
-  "Run ROUNDS rounds (default 2) of both renderers in both modes.
+  "Run ROUNDS rounds (default 2) of both engines in both modes.
 Return the report as a string."
   (let (lines)
     (dotimes (_ (or rounds 2))
       (dolist (mode '(sequential batch))
-        (dolist (renderer '(latex ratex))
+        (dolist (engine '(latex ratex))
           (push (latex-to-svg-backend-benchmark--line
-                 (latex-to-svg-backend-benchmark--run renderer mode))
+                 (latex-to-svg-backend-benchmark--run engine mode))
                 lines))))
     (concat (format "Emacs %s, precompile %s, appended preamble %s\n"
                     emacs-version latex-to-svg-backend-precompile
@@ -153,9 +153,9 @@ Return the report as a string."
 
 ;;;###autoload
 (defun latex-to-svg-backend-benchmark (&optional rounds)
-  "Time the LaTeX and RaTeX renderers and show the report.
+  "Time the LaTeX and RaTeX engines and show the report.
 ROUNDS (default 2, or the prefix argument) is how many times each
-renderer runs in each mode.  Emacs is busy until it finishes."
+engine runs in each mode.  Emacs is busy until it finishes."
   (interactive "P")
   (let ((report (latex-to-svg-backend-benchmark-report
                  (and rounds (prefix-numeric-value rounds)))))

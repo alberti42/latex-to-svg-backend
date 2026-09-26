@@ -14,7 +14,7 @@
 ;;   emacs -batch -l ert -l tests/latex-to-svg-backend-tests.el \
 ;;         -f ert-run-tests-batch-and-exit
 ;;
-;; These exercise the rendering engine in isolation — no external TeX
+;; These exercise the rendering backend in isolation — no external TeX
 ;; toolchain and no graphical display are required (the graphical inputs
 ;; are stubbed where needed).
 
@@ -64,7 +64,7 @@
       (should-not (equal base (latex-to-svg-backend--cache-key "E=mc^2"))))))
 
 (ert-deftest latex-to-svg-backend-cache-key-distinguishes-delimiters ()
-  ;; The engine renders LATEX verbatim, so inline vs display (different
+  ;; The backend renders LATEX verbatim, so inline vs display (different
   ;; delimiters) are simply different strings and get distinct keys with no
   ;; special-casing — a `$x$' image never collides with a `\[x\]' one.
   (should-not (equal (latex-to-svg-backend--cache-key "$x$")
@@ -616,7 +616,7 @@
   ;; Renderable but no toolchain => the placeholder panel image, not nil.
   (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
             ((symbol-function 'latex-to-svg-backend-tools-available-p)
-             (lambda (&optional _renderer) nil))
+             (lambda (&optional _engine) nil))
             ((symbol-function 'latex-to-svg-backend--placeholder)
              (lambda (_latex) 'placeholder-image)))
     (should (eq (latex-to-svg-backend "E=mc^2") 'placeholder-image))))
@@ -629,7 +629,7 @@
         (compiles 0))
     (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
               ((symbol-function 'latex-to-svg-backend-tools-available-p)
-               (lambda (&optional _renderer) t))
+               (lambda (&optional _engine) t))
               ((symbol-function 'latex-to-svg-backend--cached-image) (lambda (&rest _) nil))
               ((symbol-function 'latex-to-svg-backend--compile)
                (lambda (&rest _) (cl-incf compiles))))
@@ -649,7 +649,7 @@
     (unwind-protect
         (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
                   ((symbol-function 'latex-to-svg-backend-tools-available-p)
-                   (lambda (&optional _renderer) t))
+                   (lambda (&optional _engine) t))
                   ((symbol-function 'latex-to-svg-backend--svg-file) (lambda (_k) tmp))
                   ((symbol-function 'latex-to-svg-backend--cached-image) (lambda (&rest _) nil))
                   ((symbol-function 'latex-to-svg-backend--compile)
@@ -1110,7 +1110,7 @@ kept for symmetry with the compile pipeline."
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-metadata-disabled-writes-nothing ()
-  ;; With no prefix the engine captures nothing and writes no sidecar.
+  ;; With no prefix the backend captures nothing and writes no sidecar.
   (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-meta-off" t))
         (latex-to-svg-backend-metadata-prefix nil))
     (unwind-protect
@@ -1577,7 +1577,7 @@ Return the SVG path."
   ;; invariant asserted here (a prompt cannot be asserted on directly
   ;; without a language-environment switch, and a regression must fail the
   ;; suite rather than hang it).  This is also why the preamble needs no
-  ;; `inputenc' line: LaTeX reads UTF-8 by default and the engine writes it.
+  ;; `inputenc' line: LaTeX reads UTF-8 by default and the backend writes it.
   (latex-to-svg-backend-tests--with-fake-processes
     (let* ((coding-system-for-write nil)
            (select-safe-coding-system-function
@@ -1628,12 +1628,12 @@ Return the SVG path."
                        "345 pt" "345" "pt" "345px" 345))
       (should-not (funcall safe bad)))))
 
-;;;; Renderer choice
+;;;; Engine choice
 
 (ert-deftest latex-to-svg-backend-latex-cache-key-is-unchanged ()
-  ;; Adding a renderer must not re-key the LaTeX renderer's cache: every
+  ;; Adding an engine must not re-key the LaTeX engine's cache: every
   ;; user's warm cache would be recompiled.  This is the formula the key had
-  ;; before the renderer choice existed, with the renderer left out (as
+  ;; before the engine choice existed, with the engine left out (as
   ;; every existing caller does) and named.
   (let ((key (secure-hash 'sha1
                           (format "%d\0%s\0%s"
@@ -1643,8 +1643,8 @@ Return the SVG path."
     (should (equal (latex-to-svg-backend--cache-key "E=mc^2") key))
     (should (equal (latex-to-svg-backend--cache-key "E=mc^2" 'latex) key))))
 
-(ert-deftest latex-to-svg-backend-cache-key-separates-renderers ()
-  ;; The same LaTeX gets one key per renderer, the RaTeX key follows the
+(ert-deftest latex-to-svg-backend-cache-key-separates-engines ()
+  ;; The same LaTeX gets one key per engine, the RaTeX key follows the
   ;; macros and not the LaTeX preamble.
   (let* ((latex-to-svg-backend-ratex-macros "")
          (latex-key (latex-to-svg-backend--cache-key "$x$" 'latex))
@@ -1655,17 +1655,17 @@ Return the SVG path."
     (let ((latex-to-svg-backend-ratex-macros "\\def\\v{\\mathbf{v}}"))
       (should-not (equal ratex-key (latex-to-svg-backend--cache-key "$x$" 'ratex))))))
 
-(ert-deftest latex-to-svg-backend-unknown-renderer-signals ()
-  ;; A misspelt renderer is reported, not quietly replaced by a default, by
+(ert-deftest latex-to-svg-backend-unknown-engine-signals ()
+  ;; A misspelt engine is reported, not quietly replaced by a default, by
   ;; every public function that takes one.
-  (should-error (latex-to-svg-backend "$x$" :renderer 'mathjax))
+  (should-error (latex-to-svg-backend "$x$" :engine 'mathjax))
   (should-error (latex-to-svg-backend-tools-available-p 'mathjax))
   (should-error (latex-to-svg-backend-invalidate "$x$" 'mathjax))
   (should-error (latex-to-svg-backend-metadata "$x$" 'mathjax)))
 
-(ert-deftest latex-to-svg-backend-tools-available-p-follows-renderer ()
-  ;; Each renderer is available when its own programs are found.
-  ;; Nil is the LaTeX renderer.
+(ert-deftest latex-to-svg-backend-tools-available-p-follows-engine ()
+  ;; Each engine is available when its own programs are found.
+  ;; Nil is the LaTeX engine.
   (let ((latex-to-svg-backend-latex-program "l2s-no-such-latex")
         (latex-to-svg-backend-ratex-program "emacs"))
     (should-not (latex-to-svg-backend-tools-available-p))
@@ -1674,12 +1674,12 @@ Return the SVG path."
     (let ((latex-to-svg-backend-ratex-program "l2s-no-such-render-svg"))
       (should-not (latex-to-svg-backend-tools-available-p 'ratex)))))
 
-(ert-deftest latex-to-svg-backend-renderer-is-per-call ()
-  ;; `:renderer' decides both the cache key and the compile, per call: the
-  ;; same equation queued without it (the LaTeX renderer) and with `ratex'
+(ert-deftest latex-to-svg-backend-engine-is-per-call ()
+  ;; `:engine' decides both the cache key and the compile, per call: the
+  ;; same equation queued without it (the LaTeX engine) and with `ratex'
   ;; gets two entries and two different compiles.  `-invalidate' and
-  ;; `-metadata' name the entry of the renderer they are given.
-  (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-renderer" t))
+  ;; `-metadata' name the entry of the engine they are given.
+  (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-engine" t))
          (latex-to-svg-backend--pending (make-hash-table :test 'equal))
          (latex-to-svg-backend-ratex-macros "")
          (doc "$x$")
@@ -1697,7 +1697,7 @@ Return the SVG path."
                   ((symbol-function 'latex-to-svg-backend--ratex-compile)
                    (lambda (key &rest _) (push (cons 'ratex key) compiled))))
           (should-not (latex-to-svg-backend doc :callback #'ignore))
-          (should-not (latex-to-svg-backend doc :callback #'ignore :renderer 'ratex))
+          (should-not (latex-to-svg-backend doc :callback #'ignore :engine 'ratex))
           (should (equal compiled (list (cons 'ratex ratex-key)
                                         (cons 'latex latex-key))))
           (dolist (key (list latex-key ratex-key))
@@ -1712,7 +1712,7 @@ Return the SVG path."
           (should (file-exists-p (latex-to-svg-backend--svg-file latex-key))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
-;;;; RaTeX renderer
+;;;; RaTeX engine
 
 (ert-deftest latex-to-svg-backend-ratex-formula-strips-delimiters ()
   ;; RaTeX rejects `\(' and `\[': the outer delimiter is removed, and it
@@ -1867,7 +1867,7 @@ Return the SVG path."
                          "\\[\\int_0^1 f\\,dx\\]"
                          "\\begin{align}\na&=b \\\\ % first\nc&=d\n\\end{align}"))
             (let ((done 'pending))
-              (latex-to-svg-backend doc :renderer 'ratex
+              (latex-to-svg-backend doc :engine 'ratex
                                     :callback (lambda () (setq done t)))
               (dotimes (_ 100)
                 (when (eq done 'pending)

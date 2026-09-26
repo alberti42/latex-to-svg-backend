@@ -9,15 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A second renderer, RaTeX's `render-svg`, which needs no TeX installation.
-  The new `:renderer` key of `latex-to-svg-backend` chooses between `latex`
+- A second engine, RaTeX's `render-svg`, which needs no TeX installation.
+  The new `:engine` key of `latex-to-svg-backend` chooses between `latex`
   (the default, also `nil`: `latex` + `dvisvgm`) and `ratex`, per call, as
   `:color` does; a front-end owns the user's choice and passes it. A caller
-  that passes no `:renderer` gets the LaTeX renderer, as before. The RaTeX
-  renderer produces the same color- and size-independent SVG, cropped to the
+  that passes no `:engine` gets the LaTeX engine, as before. The RaTeX
+  engine produces the same color- and size-independent SVG, cropped to the
   ink, so recoloring, resizing, `:background` and `:padding` work as with
   LaTeX. It typesets the math KaTeX supports and loads no packages; see the
-  README's *Renderers* section for what differs.
+  README's *Engines* section for what differs.
 - `latex-to-svg-backend-ratex-program` (default `"render-svg"`) and
   `latex-to-svg-backend-ratex-macros`, macro definitions put in front of every
   formula RaTeX renders, in the Customize subgroup
@@ -25,17 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- In the documentation, "engine" now names the program that typesets an
+  equation, LaTeX or RaTeX, and "backend" names this package. The released
+  versions' entries below use "engine" for the package, as they were written.
 - `latex-to-svg-backend-tools-available-p`, `latex-to-svg-backend-invalidate`
-  and `latex-to-svg-backend-metadata` take an optional renderer argument, as
-  for `:renderer`. Without it they work on the LaTeX renderer, as before.
-  The LaTeX renderer's cache keys are unchanged, so no cached SVG is
+  and `latex-to-svg-backend-metadata` take an optional engine argument, as
+  for `:engine`. Without it they work on the LaTeX engine, as before.
+  The LaTeX engine's cache keys are unchanged, so no cached SVG is
   recompiled.
 - The library is split into four files: `latex-to-svg-backend.el` (the entry
   points), `latex-to-svg-backend-core.el` (the parts that do not depend on how
   an equation is typeset), `latex-to-svg-backend-latex.el` (the LaTeX
-  renderer) and `latex-to-svg-backend-ratex.el` (the RaTeX renderer). Load
+  engine) and `latex-to-svg-backend-ratex.el` (the RaTeX engine). Load
   `latex-to-svg-backend` as before; no function or option was renamed.
-- The options of the LaTeX renderer (`-latex-program`, `-dvisvgm-program`,
+- The options of the LaTeX engine (`-latex-program`, `-dvisvgm-program`,
   `-preamble`, `-appended-preamble`, `-line-width`, `-precompile`,
   `-metadata-prefix`) moved to a Customize subgroup,
   `latex-to-svg-backend-latex`, inside `latex-to-svg-backend`.
