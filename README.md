@@ -319,7 +319,7 @@ The cache root is organised into two subdirectories (plus a `gc-timestamp` house
 $XDG_CACHE_HOME/emacs/latex-to-svg/
 ├── svg/           # equation SVGs, sharded 256 ways
 │   └── ab/ abcd….svg  abcd….eld  abcd….log
-├── fmt/           # precompiled preamble format files
+├── fmt/           # precompiled .fmt files of the preamble
 │   └── <fkey>.fmt  <fkey>.eld
 └── gc-timestamp
 ```

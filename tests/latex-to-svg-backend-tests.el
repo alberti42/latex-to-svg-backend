@@ -1271,8 +1271,8 @@ kept for symmetry with the compile pipeline."
 ;;;; Preamble precompilation (.fmt)
 
 (ert-deftest latex-to-svg-backend-format-key-folds-in-preamble ()
-  ;; The format key names the `.fmt'; it must change when the preamble (base
-  ;; or appended) or the LaTeX program changes, so a stale format is never
+  ;; The key names the `.fmt' file; it must change when the preamble (base
+  ;; or appended) or the LaTeX program changes, so a stale `.fmt' file is never
   ;; reused after a preamble edit.
   (let ((base (latex-to-svg-backend--format-key)))
     (should (equal base (latex-to-svg-backend--format-key)))
@@ -1370,7 +1370,7 @@ kept for symmetry with the compile pipeline."
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-block-format-blocklists-and-deletes ()
-  ;; Abandoning a format deletes the `.fmt', records its key, and makes
+  ;; Abandoning a `.fmt' file deletes it, records its key, and makes
   ;; `--ensure-format' skip precompilation for that preamble thereafter.
   (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-fmt-block" t))
         (latex-to-svg-backend-precompile t)
@@ -1386,7 +1386,7 @@ kept for symmetry with the compile pipeline."
           (should (gethash fkey latex-to-svg-backend--format-blocklist))
           ;; Blocklisted => ensure-format yields nil without rebuilding.
           (cl-letf (((symbol-function 'latex-to-svg-backend--build-format)
-                     (lambda (_k) (error "must not rebuild a blocklisted format"))))
+                     (lambda (_k) (error "must not dump a blocklisted .fmt file"))))
             (should-not (latex-to-svg-backend--ensure-format))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
@@ -1430,7 +1430,7 @@ kept for symmetry with the compile pipeline."
             (should (eq done t))
             (should (file-exists-p
                      (latex-to-svg-backend--svg-file (latex-to-svg-backend--cache-key doc))))
-            ;; The format file was built and cached alongside the SVG.
+            ;; The `.fmt' file was dumped and cached alongside the SVG.
             (should (file-exists-p
                      (latex-to-svg-backend--format-file (latex-to-svg-backend--format-key))))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
@@ -1529,7 +1529,7 @@ Return the SVG path."
 
 (ert-deftest latex-to-svg-backend-clear-cache-empties-svgs-keeps-fmt ()
   ;; `clear-cache' deletes svg/eld across shards and empties the image cache,
-  ;; but leaves `.fmt' format files alone.
+  ;; but leaves `.fmt' files alone.
   (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-clear" t))
         (latex-to-svg-backend--image-cache (make-hash-table :test 'equal)))
     (unwind-protect
@@ -2377,7 +2377,7 @@ NEWEST is a function returning the most recently started fake process."
                 (should (file-exists-p
                          (latex-to-svg-backend--svg-file
                           (latex-to-svg-backend--cache-key doc))))))
-            ;; The format holds the global preamble only, and loading it
+            ;; The `.fmt' file holds the global preamble only, and loading it
             ;; did not fail over to the full preamble.
             (should (= 0 (hash-table-count
                           latex-to-svg-backend--format-blocklist)))
@@ -2386,7 +2386,7 @@ NEWEST is a function returning the most recently started fake process."
                       (latex-to-svg-backend--format-key))))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
-;;;; Format stamps and collection
+;;;; Stamps and collection of the `.fmt' files
 
 (defmacro latex-to-svg-backend-tests--with-format-cache (&rest body)
   "Run BODY with an empty cache, precompilation on, and a fake LaTeX binary.
@@ -2414,9 +2414,9 @@ The binary is bound to `binary'; the dump is stubbed to write the
        (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-format-stamp-decides-freshness ()
-  ;; A format is reused in a new session while its stamp names the binary
-  ;; and its mtime; another binary, a changed mtime, or no stamp dumps it
-  ;; again.  The `.fmt' mtime plays no part.
+  ;; A `.fmt' file is reused in a new session while its stamp names the
+  ;; binary and its mtime; another binary, a changed mtime, or no stamp
+  ;; dumps it again.  The mtime of the `.fmt' file plays no part.
   (latex-to-svg-backend-tests--with-format-cache
     (let* ((fmt (latex-to-svg-backend--ensure-format))
            (stamp (latex-to-svg-backend--format-stamp-file fmt))
@@ -2427,7 +2427,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
       (should (equal (with-temp-buffer (insert-file-contents stamp)
                                        (read (current-buffer)))
                      (latex-to-svg-backend--binary-stamp binary)))
-      ;; A format older than the binary is still the binary's.
+      ;; A `.fmt' file older than the binary is still the binary's.
       (set-file-times fmt '(1 0))
       (should (equal fmt (funcall new-session)))
       (should (= builds 1))
@@ -2443,7 +2443,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
               (funcall new-session)
               (should (= builds 3)))
           (delete-file binary)))
-      ;; A format dumped before stamps existed.
+      ;; A `.fmt' file dumped before stamps existed.
       (delete-file stamp)
       (funcall new-session)
       (should (= builds 4)))))
@@ -2494,7 +2494,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-format-use-bumps-its-mtime ()
-  ;; Each compile that loads a format bumps its mtime, the GC's last-use
+  ;; Each compile that loads a `.fmt' file bumps its mtime, the GC's last-use
   ;; hint, also after the session has verified it.
   (latex-to-svg-backend-tests--with-format-cache
     (let* ((fmt (latex-to-svg-backend--ensure-format))
@@ -2511,7 +2511,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
       (should (= builds 1)))))
 
 (ert-deftest latex-to-svg-backend-collected-format-means-a-full-compile ()
-  ;; A format another session collected between the check and the touch
+  ;; A `.fmt' file another session collected between the check and the touch
   ;; gives nil: the compile embeds the full preamble.
   (latex-to-svg-backend-tests--with-format-cache
     (let ((fmt (latex-to-svg-backend--ensure-format)))
@@ -2521,7 +2521,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
         (should-not (latex-to-svg-backend--touch-format fmt))))))
 
 (ert-deftest latex-to-svg-backend-block-and-flush-delete-format-stamps ()
-  ;; A blocked format loses its stamp; a flush deletes every stamp.
+  ;; A blocked `.fmt' file loses its stamp; a flush deletes every stamp.
   (latex-to-svg-backend-tests--with-format-cache
     (let* ((fmt (latex-to-svg-backend--ensure-format))
            (stamp (latex-to-svg-backend--format-stamp-file fmt))
@@ -2536,8 +2536,9 @@ The binary is bound to `binary'; the dump is stubbed to write the
                                    nil "\\.\\(?:fmt\\|eld\\)\\'")))))
 
 (ert-deftest latex-to-svg-backend-gc-collects-old-formats ()
-  ;; A format untouched for longer than the age cap goes with its stamp; a
-  ;; failed dump's log is dated by itself; a format in use stays.
+  ;; A `.fmt' file untouched for longer than the age cap goes with its
+  ;; stamp; a failed dump's log is dated by itself; a `.fmt' file in use
+  ;; stays.
   (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-gc-fmt" t))
         (latex-to-svg-backend-cache-max-age 30)
         (old (* 90 86400)))

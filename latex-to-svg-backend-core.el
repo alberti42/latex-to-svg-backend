@@ -385,7 +385,7 @@ cache).  All of KEY's files — `.svg', `.eld', `.log' — live together in
 (defun latex-to-svg-backend--touch (file)
   "Bump FILE's modification time to now (a last-use hint for GC).
 `latex-to-svg-backend-gc' treats the SVG mtime as the equation's last-use
-time, so this is called whenever a cached SVG is (re)loaded.  A format
+time, so this is called whenever a cached SVG is (re)loaded.  A `.fmt'
 file has its own (see `latex-to-svg-backend--touch-format').
 
 Signals `file-missing' when FILE is gone -- the caller treats that as a
@@ -908,10 +908,11 @@ has an `.svg'; one whose compile failed has no `.svg', only its `.log'
 and, when the formula was at fault, its `.eld' failure record.")
 
 (defconst latex-to-svg-backend--format-extensions '(".fmt" ".eld" ".log")
-  "Extensions of the files a format entry can have, the leading one first.
-A format entry is the files named after one format key in `fmt/': a
-dumped format has a `.fmt' and its `.eld' stamp; a dump that failed
-leaves only its `.log'.")
+  "Extensions of the files a `.fmt' entry can have, the leading one first.
+A `.fmt' entry is the files in `fmt/' named after one key of
+`latex-to-svg-backend--format-key': a dump that succeeded leaves the
+`.fmt' file and its `.eld' stamp; a dump that failed leaves only its
+`.log'.")
 
 (defun latex-to-svg-backend--entry-lead (file &optional extensions)
   "Return the file that dates the cache entry FILE belongs to, or nil.
@@ -1008,7 +1009,7 @@ no SVG, left by a failed compile, is dated by its `.eld' failure record,
 else by its `.log' (see `latex-to-svg-backend--entry-lead'); a pruned one
 is compiled again the next time it is needed.
 
-A precompiled format (`.fmt', with its stamp) older than the same age
+A precompiled `.fmt' file, with its stamp, older than the same age
 is deleted too: its mtime is bumped on every compile that loads it
 \(see `latex-to-svg-backend--touch-format'), and one still wanted is
 dumped again on the next compile.  So is the log of a dump that
@@ -1016,7 +1017,7 @@ failed.
 
 Runs automatically about once a day (see `latex-to-svg-backend-gc-interval');
 this command forces a run now.  Returns a cons (DELETED . BYTES-FREED),
-DELETED counting equations and formats."
+DELETED counting equations and `.fmt' files."
   (interactive)
   (let ((equations '(0 . 0)) (formats '(0 . 0)))
     (when-let* ((max-age latex-to-svg-backend-cache-max-age))
@@ -1028,7 +1029,7 @@ DELETED counting equations and formats."
     (let ((freed (+ (cdr equations) (cdr formats))))
       (when (called-interactively-p 'interactive)
         (message "latex-to-svg-backend: GC removed %d equation(s) and %d \
-format(s), freed %s"
+.fmt file(s), freed %s"
                  (car equations) (car formats)
                  (file-size-human-readable freed)))
       (cons (+ (car equations) (car formats)) freed))))
@@ -1038,7 +1039,7 @@ format(s), freed %s"
   "Delete every cached equation SVG and its `.eld'/`.log' siblings.
 
 Empties the on-disk equation cache (all shards) and the in-memory image
-cache; precompiled `.fmt' format files are kept (see
+cache; precompiled `.fmt' files are kept (see
 `latex-to-svg-backend-flush-format').  Every equation simply recompiles on
 next use — a blunt companion to `latex-to-svg-backend-gc' and
 `latex-to-svg-backend-invalidate'."
