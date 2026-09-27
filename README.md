@@ -7,17 +7,15 @@
 [![CI](https://github.com/alberti42/latex-to-svg-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/alberti42/latex-to-svg-backend/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/github/license/alberti42/latex-to-svg-backend)](LICENSE)
 
-A small, **buffer-agnostic** Emacs library that turns a LaTeX math string into an SVG image suitable for overlaying in a buffer. It is the rendering backend behind [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) and the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) preview stack for Org and Markdown. A front-end does its own equation *detection* and image *placement*; the typesetting, caching and sizing is done by the banckend.
-
-Used by [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) (Org/Markdown math preview) and [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) (math in `agent-shell` output); see [Related packages](#related-packages).
+A **buffer-agnostic** Emacs library that turns one LaTeX math string into one SVG image, compiled with [LaTeX](https://www.latex-project.org/) (`latex` → `dvisvgm`) or with [RaTeX](https://github.com/erweixin/RaTeX) (`render-svg`, no TeX installation). Equations are compiled once and then recolored and rescaled **without recompiling**, so an image follows the buffer's theme and font size. A front-end does its own equation *detection* and image *placement*; the typesetting, caching and sizing is done by the backend. The front-ends are [**`latex-to-svg`**](https://github.com/alberti42/latex-to-svg) (math in Org and Markdown buffers) and [**`agent-shell-math-renderer`**](https://github.com/alberti42/agent-shell-math-renderer) (math in `agent-shell` output); see [Related packages](#related-packages).
 
 ## Why
 
 Equations are compiled once and then recolored and rescaled **without recompiling** — the two things that are expensive if you bake color/size into the render:
 
 - **Each equation compiles once.** The cache file is named after the equation itself (the SHA-1 of the LaTeX, the preamble and the style), so identical input always finds its own file and the cache is shared across every front-end and buffer.
-- **Color-independent SVG.** `dvisvgm --currentcolor` emits the default ink as the literal token `currentColor`, substituted with the buffer foreground at display time. A theme switch re-tints from cache — no recompile. The image background is transparent, so it always matches the buffer.
-- **Size-independent SVG.** Compiled at `dvisvgm --scale=1` (natural point dimensions, glyphs as outline paths) and scaled at display time via `create-image`'s `:scale`, computed from the buffer font height so equations track the font — again no recompile.
+- **Color-independent SVG.** The default ink is the literal token `currentColor` in the SVG (`dvisvgm --currentcolor` writes it; for RaTeX the backend replaces a marker color with it), substituted with the buffer foreground at display time. A theme switch re-tints from cache — no recompile. The image background is transparent, so it always matches the buffer.
+- **Size-independent SVG.** Both engines compile at a 10pt em, 1 SVG unit = 1pt (`dvisvgm --scale=1`; RaTeX `--font-size 40 --dpr 0.25`), with glyphs as outline paths. At display time, `create-image`'s `:scale` maps the 10pt em onto the buffer font height, so equations track the font — also here no recompile.
 - **In-memory image cache.** On top of the on-disk SVG cache, each ready-to-display image (the SVG already tinted and scaled for the current buffer) is memoized for the session, keyed by content + color + scale. Re-showing an equation you've already displayed — revisiting a buffer, scrolling back, a redisplay — is then an instant hash lookup, with no disk read and no recompile. Sizes and colors coexist as separate entries, so a font or theme change just adds one.
 
 ## Related packages
