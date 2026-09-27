@@ -314,7 +314,17 @@ Every backslash is doubled, as in any Elisp string. `\input` looks for the file 
 
 - The directory is part of the cache key, and of the `.fmt` file's key when `-preamble` or `-appended-preamble` is set per buffer, so two projects with the same `\input{macros.tex}` share neither SVGs nor `.fmt` files. A buffer with no buffer-local preamble uses the one `.fmt` file everyone shares.
 - A directory holding one of `\ { } % # ~`, or a remote one (the compile runs locally), gets no `\input@path` and is reported once.
-- Neither option has a `:safe` predicate, as both are LaTeX code: Emacs asks before applying them from a `.dir-locals.el`.
+- Neither option has a `:safe` predicate, as both are LaTeX code: Emacs asks
+  before applying them from a `.dir-locals.el`, and answering `!` trusts only
+  that exact value, so the next edit of the string asks again. For a project
+  you started or otherwise trust, list its directory, the one holding
+  `.dir-locals.el`, in `safe-local-variable-directories` (Emacs 30.1+). Emacs
+  then applies that `.dir-locals.el` without asking, whatever it sets:
+
+  ```elisp
+  (add-to-list 'safe-local-variable-directories
+               (expand-file-name "~/papers/thesis/"))
+  ```
 - The RaTeX engine has no preamble and ignores both. An equation that uses a project macro fails with RaTeX and, with `:fallback latex`, is typeset by LaTeX, which reads them. RaTeX's own `latex-to-svg-backend-ratex-macros` can be set per project too.
 
 ### Controlling the width of numbered equations (`latex-to-svg-backend-line-width`)
