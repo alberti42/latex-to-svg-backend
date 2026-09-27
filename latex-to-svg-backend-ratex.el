@@ -71,11 +71,20 @@ The value is folded into the cache key, so changing it re-renders."
 
 ;;;; Cache key
 
-(defun latex-to-svg-backend--ratex-cache-salt ()
+(defun latex-to-svg-backend--ratex-inputs ()
+  "Return what the RaTeX engine reads from the current buffer, as a plist.
+That is `(:ratex-macros MACROS)', the value of
+`latex-to-svg-backend-ratex-macros'.  A request reads it once, in the
+buffer that makes it, and passes it on: a fallback to RaTeX starts from
+the process sentinel, where the current buffer is another."
+  (list :ratex-macros latex-to-svg-backend-ratex-macros))
+
+(defun latex-to-svg-backend--ratex-cache-salt (inputs)
   "Return the text the RaTeX engine folds into the cache key.
-The engine's name keeps its SVGs apart from the LaTeX engine's, and
-`latex-to-svg-backend-ratex-macros' is part of every formula."
-  (concat "ratex\0" latex-to-svg-backend-ratex-macros))
+INPUTS is as for `latex-to-svg-backend--ratex-inputs'.  The engine's
+name keeps its SVGs apart from the LaTeX engine's, and the macros are
+part of every formula."
+  (concat "ratex\0" (plist-get inputs :ratex-macros)))
 
 ;;;; Formula
 
@@ -99,12 +108,12 @@ display formula is not read as an inline one.")
     (replace-regexp-in-string
      "\\(?:^\\|[^\\]\\)\\(?:\\\\\\\\\\)*\\(%.*\\)$" "" text t t 1))))
 
-(defun latex-to-svg-backend--ratex-formula (latex)
+(defun latex-to-svg-backend--ratex-formula (latex &optional macros)
   "Return (FORMULA . INLINE) for rendering LATEX with RaTeX.
 FORMULA is LATEX on one line (see `latex-to-svg-backend--ratex-one-line')
 with its outer delimiter removed (see
-`latex-to-svg-backend--ratex-delimiters') and
-`latex-to-svg-backend-ratex-macros' in front.  INLINE is non-nil when
+`latex-to-svg-backend--ratex-delimiters') and MACROS in front, by
+default `latex-to-svg-backend-ratex-macros'.  INLINE is non-nil when
 the delimiter was an inline one."
   (let* ((body (latex-to-svg-backend--ratex-one-line latex))
          (delimiter
@@ -114,7 +123,7 @@ the delimiter was an inline one."
                            (string-suffix-p close body)))
                     latex-to-svg-backend--ratex-delimiters))
          (macros (latex-to-svg-backend--ratex-one-line
-                  latex-to-svg-backend-ratex-macros)))
+                  (or macros latex-to-svg-backend-ratex-macros))))
     (when delimiter
       (setq body (string-trim
                   (substring body (length (nth 0 delimiter))
@@ -245,8 +254,10 @@ prints \"Failed to write SVG\" instead, and a panic aborts."
   (and (equal exit '(ratex . 1))
        (string-match-p "^ERR .* Parse error: " output)))
 
-(defun latex-to-svg-backend--ratex-compile (key latex)
+(defun latex-to-svg-backend--ratex-compile (key latex &optional inputs)
   "Asynchronously render LATEX with RaTeX to the cache SVG for KEY.
+INPUTS is the plist of `latex-to-svg-backend--ratex-inputs', nil
+meaning the current buffer's.
 The formula (see `latex-to-svg-backend--ratex-formula') is written to a
 scratch directory, where `latex-to-svg-backend-ratex-program' renders it.
 On success the SVG is stored in the cache (see
@@ -258,7 +269,10 @@ is saved, and when RaTeX could not parse the formula (see
 The scratch directory is removed either way.
 
 RaTeX emits no compile metadata, so no `.eld' sidecar is written."
-  (pcase-let* ((`(,formula . ,inline) (latex-to-svg-backend--ratex-formula latex))
+  (pcase-let* ((`(,formula . ,inline)
+                (latex-to-svg-backend--ratex-formula
+                 latex (plist-get (or inputs (latex-to-svg-backend--ratex-inputs))
+                                  :ratex-macros)))
                (dir (make-temp-file "latex-to-svg-backend" t))
                (input (expand-file-name "equation.txt" dir))
                ;; `render-svg' numbers its outputs, from 0001.svg.

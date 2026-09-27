@@ -378,13 +378,13 @@
                    (lambda (&rest _) (cl-incf warnings))))
           (clrhash latex-to-svg-backend--format-checked)
           (clrhash latex-to-svg-backend--format-blocklist)
-          (should-not (latex-to-svg-backend--ensure-format))
-          (should-not (latex-to-svg-backend--ensure-format))
-          (should-not (latex-to-svg-backend--ensure-format))
+          (should-not (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))
+          (should-not (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))
+          (should-not (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))
           ;; Dumped once, then blocklisted -- and said so once.
           (should (= 1 builds))
           (should (= 1 warnings))
-          (should (gethash (latex-to-svg-backend--format-key)
+          (should (gethash (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble))
                            latex-to-svg-backend--format-blocklist)))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
@@ -402,8 +402,8 @@
                   ((symbol-function 'display-warning)
                    (lambda (&rest _) (cl-incf warnings))))
           (clrhash latex-to-svg-backend--warned)
-          (should-not (latex-to-svg-backend--build-format "deadbeef"))
-          (should-not (latex-to-svg-backend--build-format "deadbeef"))
+          (should-not (latex-to-svg-backend--build-format "deadbeef" (latex-to-svg-backend--preamble)))
+          (should-not (latex-to-svg-backend--build-format "deadbeef" (latex-to-svg-backend--preamble)))
           (should (= 1 warnings)))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
@@ -923,7 +923,7 @@ completion event."
                 (setq metadata-seen (latex-to-svg-backend-metadata doc)))))
        latex-to-svg-backend--pending)
       (cl-letf (((symbol-function 'latex-to-svg-backend--ensure-format)
-                 (lambda ()
+                 (lambda (_preamble)
                    (cl-incf ensure-calls)
                    fmt)))
         (latex-to-svg-backend--compile key doc 7)
@@ -1274,14 +1274,14 @@ kept for symmetry with the compile pipeline."
   ;; The key names the `.fmt' file; it must change when the preamble (base
   ;; or appended) or the LaTeX program changes, so a stale `.fmt' file is never
   ;; reused after a preamble edit.
-  (let ((base (latex-to-svg-backend--format-key)))
-    (should (equal base (latex-to-svg-backend--format-key)))
+  (let ((base (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble))))
+    (should (equal base (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble))))
     (let ((latex-to-svg-backend-appended-preamble "\\usepackage{physics}"))
-      (should-not (equal base (latex-to-svg-backend--format-key))))
+      (should-not (equal base (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble)))))
     (let ((latex-to-svg-backend-preamble "\\documentclass{minimal}"))
-      (should-not (equal base (latex-to-svg-backend--format-key))))
+      (should-not (equal base (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble)))))
     (let ((latex-to-svg-backend-latex-program "xelatex"))
-      (should-not (equal base (latex-to-svg-backend--format-key))))))
+      (should-not (equal base (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble)))))))
 
 (ert-deftest latex-to-svg-backend-preamble-appends ()
   ;; The combined preamble is the base alone when nothing is appended, else
@@ -1310,8 +1310,8 @@ kept for symmetry with the compile pipeline."
   ;; With precompilation off, no `.fmt' file is dumped or consulted.
   (let ((latex-to-svg-backend-precompile nil))
     (cl-letf (((symbol-function 'latex-to-svg-backend--build-format)
-               (lambda (_k) (error "must not dump when disabled"))))
-      (should-not (latex-to-svg-backend--ensure-format)))))
+               (lambda (_k _preamble) (error "must not dump when disabled"))))
+      (should-not (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))))))
 
 (ert-deftest latex-to-svg-backend-ensure-format-builds-once-and-reuses ()
   ;; First call builds the `.fmt' (stubbed); the session then reuses it
@@ -1327,16 +1327,16 @@ kept for symmetry with the compile pipeline."
                    (lambda () (let ((f (make-temp-file "l2s-bin")))
                                 (set-file-times f '(1 0)) f)))
                   ((symbol-function 'latex-to-svg-backend--build-format)
-                   (lambda (fkey)
+                   (lambda (fkey _preamble)
                      (cl-incf builds)
                      (let ((f (latex-to-svg-backend--format-file fkey)))
                        (with-temp-file f (insert "fmt")) f))))
-          (let ((f1 (latex-to-svg-backend--ensure-format)))
+          (let ((f1 (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))))
             (should f1)
             (should (file-exists-p f1))
             (should (= builds 1))
             ;; Second call: verified fresh, served from disk, no rebuild.
-            (should (equal f1 (latex-to-svg-backend--ensure-format)))
+            (should (equal f1 (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))))
             (should (= builds 1))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
@@ -1349,7 +1349,7 @@ kept for symmetry with the compile pipeline."
         (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal))
         (builds 0))
     (unwind-protect
-        (let* ((fkey (latex-to-svg-backend--format-key))
+        (let* ((fkey (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble)))
                (fmt (latex-to-svg-backend--format-file fkey))
                (newer-bin (make-temp-file "l2s-bin")))
           ;; An old .fmt on disk with no stamp.
@@ -1358,11 +1358,11 @@ kept for symmetry with the compile pipeline."
           (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
                      (lambda () newer-bin))
                     ((symbol-function 'latex-to-svg-backend--build-format)
-                     (lambda (k)
+                     (lambda (k _preamble)
                        (cl-incf builds)
                        (let ((f (latex-to-svg-backend--format-file k)))
                          (with-temp-file f (insert "new")) f))))
-            (should (latex-to-svg-backend--ensure-format))
+            (should (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))
             (should (= builds 1))
             (should (equal (with-temp-buffer (insert-file-contents fmt)
                                              (buffer-string))
@@ -1377,7 +1377,7 @@ kept for symmetry with the compile pipeline."
         (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
         (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal)))
     (unwind-protect
-        (let* ((fkey (latex-to-svg-backend--format-key))
+        (let* ((fkey (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble)))
                (fmt (latex-to-svg-backend--format-file fkey)))
           (with-temp-file fmt (insert "fmt"))
           (cl-letf (((symbol-function 'display-warning) #'ignore))
@@ -1386,8 +1386,8 @@ kept for symmetry with the compile pipeline."
           (should (gethash fkey latex-to-svg-backend--format-blocklist))
           ;; Blocklisted => ensure-format yields nil without rebuilding.
           (cl-letf (((symbol-function 'latex-to-svg-backend--build-format)
-                     (lambda (_k) (error "must not dump a blocklisted .fmt file"))))
-            (should-not (latex-to-svg-backend--ensure-format))))
+                     (lambda (_k _preamble) (error "must not dump a blocklisted .fmt file"))))
+            (should-not (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-flush-format-clears-everything ()
@@ -1432,7 +1432,7 @@ kept for symmetry with the compile pipeline."
                      (latex-to-svg-backend--svg-file (latex-to-svg-backend--cache-key doc))))
             ;; The `.fmt' file was dumped and cached alongside the SVG.
             (should (file-exists-p
-                     (latex-to-svg-backend--format-file (latex-to-svg-backend--format-key))))))
+                     (latex-to-svg-backend--format-file (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble)))))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 ;;;; Cache sharding
@@ -1591,7 +1591,7 @@ Return the SVG path."
                latex-to-svg-backend-dvisvgm-program
                latex-to-svg-backend-preamble
                latex-to-svg-backend-appended-preamble
-               latex-to-svg-backend-preamble-local
+               latex-to-svg-backend-preamble-not-precompiled
                latex-to-svg-backend-cache-directory
                latex-to-svg-backend-ratex-program
                latex-to-svg-backend-ratex-macros))
@@ -2207,33 +2207,33 @@ NEWEST is a function returning the most recently started fake process."
   `(cl-letf (((symbol-function 'project-current) #'ignore))
      ,@body))
 
-(ert-deftest latex-to-svg-backend-empty-local-preamble-leaves-the-key ()
+(ert-deftest latex-to-svg-backend-empty-not-precompiled-leaves-the-key ()
   ;; The option's default adds nothing, so every user's cache keeps its
   ;; keys, and the directory is not even looked up.
-  (let ((latex-to-svg-backend-preamble-local ""))
+  (let ((latex-to-svg-backend-preamble-not-precompiled ""))
     (cl-letf (((symbol-function 'project-current)
                (lambda (&rest _) (error "must not look for a project"))))
-      (should (equal (latex-to-svg-backend--local-preamble) ""))
-      (should (equal (latex-to-svg-backend--latex-cache-salt)
+      (should (equal (latex-to-svg-backend--not-precompiled) ""))
+      (should (equal (latex-to-svg-backend--latex-cache-salt (latex-to-svg-backend--latex-inputs))
                      (latex-to-svg-backend--preamble))))))
 
-(ert-deftest latex-to-svg-backend-local-preamble-searches-the-project ()
+(ert-deftest latex-to-svg-backend-not-precompiled-searches-the-project ()
   ;; `\input' searches the project root, else `default-directory'; the
   ;; directory is expanded, as `project-root' may return `~/...'.
-  (let ((latex-to-svg-backend-preamble-local "\\input{macros.tex}"))
+  (let ((latex-to-svg-backend-preamble-not-precompiled "\\input{macros.tex}"))
     (cl-letf (((symbol-function 'project-current)
                (lambda (&rest _) '(transient . "~/my proj_x"))))
-      (should (equal (latex-to-svg-backend--local-preamble)
+      (should (equal (latex-to-svg-backend--not-precompiled)
                      (format "\\makeatletter\\def\\input@path{{%s}}\\makeatother
 \\input{macros.tex}"
                              (expand-file-name "~/my proj_x/")))))
     (latex-to-svg-backend-tests--outside-a-project
       (let ((default-directory "/tmp/paper/"))
-        (should (equal (latex-to-svg-backend--local-preamble)
+        (should (equal (latex-to-svg-backend--not-precompiled)
                        "\\makeatletter\\def\\input@path{{/tmp/paper/}}\\makeatother
 \\input{macros.tex}"))))))
 
-(ert-deftest latex-to-svg-backend-local-preamble-folds-into-the-latex-key ()
+(ert-deftest latex-to-svg-backend-not-precompiled-folds-into-the-latex-key ()
   ;; The text and the directory are part of the LaTeX key, so two projects
   ;; with the same `\input{macros.tex}' do not share entries; the RaTeX
   ;; key ignores both.
@@ -2242,20 +2242,23 @@ NEWEST is a function returning the most recently started fake process."
            (default-directory "/tmp/a/")
            (base (latex-to-svg-backend--cache-key "$x$"))
            (ratex (latex-to-svg-backend--cache-key "$x$" 'ratex))
-           (latex-to-svg-backend-preamble-local "\\input{macros.tex}")
+           (latex-to-svg-backend-preamble-not-precompiled "\\input{macros.tex}")
            (a (latex-to-svg-backend--cache-key "$x$")))
       (should-not (equal a base))
       (should (equal ratex (latex-to-svg-backend--cache-key "$x$" 'ratex)))
       (let ((default-directory "/tmp/b/"))
         (should-not (equal a (latex-to-svg-backend--cache-key "$x$"))))
-      ;; LOCAL passed in wins over the current buffer's.
-      (should (equal base (latex-to-svg-backend--cache-key "$x$" 'latex ""))))))
+      ;; INPUTS passed in win over the current buffer's.
+      (should (equal base (latex-to-svg-backend--cache-key
+                           "$x$" 'latex
+                           (list :preamble (latex-to-svg-backend--preamble)
+                                 :not-precompiled "")))))))
 
-(ert-deftest latex-to-svg-backend-local-preamble-refuses-unusable-directories ()
+(ert-deftest latex-to-svg-backend-input-directory-refuses-unusable-directories ()
   ;; A directory TeX would read as code, or one on another host, gets no
   ;; `\input@path' line; each refusal is reported once.
   (latex-to-svg-backend-tests--outside-a-project
-    (let ((latex-to-svg-backend-preamble-local "\\input{macros.tex}")
+    (let ((latex-to-svg-backend-preamble-not-precompiled "\\input{macros.tex}")
           (latex-to-svg-backend--warned (make-hash-table :test 'equal))
           (warnings nil))
       (cl-letf (((symbol-function 'display-warning)
@@ -2263,26 +2266,26 @@ NEWEST is a function returning the most recently started fake process."
         (dolist (dir '("/tmp/50%/" "/tmp/a{b}/" "/tmp/x#1/" "/tmp/a~b/"
                        "/tmp/back\\slash/"))
           (let ((default-directory dir))
-            (should (equal (latex-to-svg-backend--local-preamble)
+            (should (equal (latex-to-svg-backend--not-precompiled)
                            "\\input{macros.tex}"))))
         (should (= 1 (length warnings)))
         (let ((default-directory "/ssh:host:/home/me/paper/"))
-          (should (equal (latex-to-svg-backend--local-preamble)
+          (should (equal (latex-to-svg-backend--not-precompiled)
                          "\\input{macros.tex}")))
         (should (= 2 (length warnings)))
         (should (string-match-p "remote" (nth 1 (car warnings))))))))
 
-(ert-deftest latex-to-svg-backend-compile-writes-the-local-preamble ()
-  ;; The local text goes before `\begin{document}': after the `%&' line
+(ert-deftest latex-to-svg-backend-compile-writes-the-not-precompiled-text ()
+  ;; The not-precompiled text goes before `\begin{document}': after the `%&' line
   ;; with a `.fmt' file, after the preamble without.  The retry after a
   ;; failed `.fmt' file runs from the sentinel, in another buffer, and
   ;; still writes the requesting buffer's text.
   (latex-to-svg-backend-tests--with-fake-processes
     (latex-to-svg-backend-tests--outside-a-project
-      (setq-local latex-to-svg-backend-preamble-local "\\input{macros.tex}")
+      (setq-local latex-to-svg-backend-preamble-not-precompiled "\\input{macros.tex}")
       (setq default-directory "/tmp/paper/")
       (let* ((doc "$\\RR$")
-             (local (latex-to-svg-backend--local-preamble))
+             (text (latex-to-svg-backend--not-precompiled))
              (key (latex-to-svg-backend--cache-key doc))
              (fmt (latex-to-svg-backend--format-file "fake-format"))
              (source (lambda ()
@@ -2293,12 +2296,12 @@ NEWEST is a function returning the most recently started fake process."
         (puthash key (list (latex-to-svg-backend--waiter #'ignore))
                  latex-to-svg-backend--pending)
         (cl-letf (((symbol-function 'latex-to-svg-backend--ensure-format)
-                   (lambda () fmt))
+                   (lambda (_preamble) fmt))
                   ((symbol-function 'display-warning) #'ignore))
           (latex-to-svg-backend--compile key doc)
           (should (equal (funcall source)
                          (concat "%& " (file-name-sans-extension fmt) "\n"
-                                 local "\n"
+                                 text "\n"
                                  "\\begin{document}\n" doc "\n"
                                  "\\end{document}\n")))
           (with-temp-buffer
@@ -2307,20 +2310,20 @@ NEWEST is a function returning the most recently started fake process."
           (should (= 2 (length l2s-test-processes)))
           (should (equal (funcall source)
                          (concat (latex-to-svg-backend--preamble) "\n"
-                                 local "\n"
+                                 text "\n"
                                  "\\begin{document}\n" doc "\n"
                                  "\\end{document}\n"))))))))
 
 (ert-deftest latex-to-svg-backend-fallback-uses-the-requesting-buffer ()
-  ;; RaTeX ignores the local preamble; the LaTeX fallback, started from
+  ;; RaTeX ignores the not-precompiled text; the LaTeX fallback, started from
   ;; the sentinel in another buffer, compiles with the requesting
   ;; buffer's, under the key that buffer computes.
   (latex-to-svg-backend-tests--with-public-api
     (latex-to-svg-backend-tests--outside-a-project
-      (setq-local latex-to-svg-backend-preamble-local "\\input{macros.tex}")
+      (setq-local latex-to-svg-backend-preamble-not-precompiled "\\input{macros.tex}")
       (setq default-directory "/tmp/paper/")
       (let* ((doc "$\\RR$")
-             (local (latex-to-svg-backend--local-preamble))
+             (text (latex-to-svg-backend--not-precompiled))
              (latex-key (latex-to-svg-backend--cache-key doc 'latex))
              (callbacks 0))
         (cl-letf (((symbol-function 'run-with-timer) #'ignore))
@@ -2331,7 +2334,7 @@ NEWEST is a function returning the most recently started fake process."
             (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes)))
           (let ((latex (car l2s-test-processes)))
             (should (string-search
-                     (concat local "\n\\begin{document}")
+                     (concat text "\n\\begin{document}")
                      (latex-to-svg-backend-tests--tex-source
                       (car (last (plist-get (aref latex 3) :command))))))
             (with-temp-buffer
@@ -2343,7 +2346,7 @@ NEWEST is a function returning the most recently started fake process."
                               doc :engine 'ratex :fallback 'latex
                               :font-height 20 :callback #'ignore))))))))
 
-(ert-deftest latex-to-svg-backend-local-preamble-end-to-end ()
+(ert-deftest latex-to-svg-backend-not-precompiled-end-to-end ()
   ;; End to end (needs latex + dvisvgm): project macros `\input' from a
   ;; directory with a space and an underscore in its name, one file below
   ;; it, with the precompiled preamble and without.
@@ -2361,7 +2364,7 @@ NEWEST is a function returning the most recently started fake process."
           (with-temp-file (expand-file-name "sub/more.tex" project)
             (insert "\\newcommand{\\QQ}{\\mathbb{Q}}\n"))
           (setq default-directory project)
-          (setq-local latex-to-svg-backend-preamble-local
+          (setq-local latex-to-svg-backend-preamble-not-precompiled
                       "\\input{macros.tex}\n\\input{sub/more.tex}")
           (cl-letf (((symbol-function 'project-current) #'ignore)
                     ((symbol-function 'latex-to-svg-backend-available-p)
@@ -2383,7 +2386,160 @@ NEWEST is a function returning the most recently started fake process."
                           latex-to-svg-backend--format-blocklist)))
             (should (file-exists-p
                      (latex-to-svg-backend--format-file
-                      (latex-to-svg-backend--format-key))))))
+                      (latex-to-svg-backend--format-key (latex-to-svg-backend--preamble)))))))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
+
+;;;; Buffer-local options
+
+(ert-deftest latex-to-svg-backend-buffer-local-preamble-searches-the-project ()
+  ;; A buffer-local `-preamble' or `-appended-preamble' starts the preamble
+  ;; with the `\input@path' line, so the dump, which runs in the cache,
+  ;; finds a relative `\input'; the directory is then part of the `.fmt'
+  ;; key.  A global value writes no such line and shares one `.fmt' file.
+  (latex-to-svg-backend-tests--outside-a-project
+    (with-temp-buffer
+      (let ((default-directory "/tmp/a/")
+            (global (latex-to-svg-backend--preamble)))
+        (should-not (string-search "input@path" global))
+        (setq-local latex-to-svg-backend-appended-preamble "\\input{macros.tex}")
+        (let ((a (latex-to-svg-backend--preamble)))
+          (should (string-prefix-p
+                   "\\makeatletter\\def\\input@path{{/tmp/a/}}\\makeatother\n" a))
+          (should (string-suffix-p "\n\\input{macros.tex}" a))
+          (let ((default-directory "/tmp/b/"))
+            (should-not (equal (latex-to-svg-backend--format-key a)
+                               (latex-to-svg-backend--format-key
+                                (latex-to-svg-backend--preamble))))))
+        (kill-local-variable 'latex-to-svg-backend-appended-preamble)
+        (setq-local latex-to-svg-backend-preamble "\\documentclass{standalone}")
+        (should (string-search "input@path" (latex-to-svg-backend--preamble)))
+        (kill-local-variable 'latex-to-svg-backend-preamble)
+        (let ((default-directory "/tmp/b/"))
+          (should (equal global (latex-to-svg-backend--preamble))))))))
+
+(ert-deftest latex-to-svg-backend-dump-and-retry-use-the-requesting-buffer ()
+  ;; The dump and the retry after a failed `.fmt' file write the requesting
+  ;; buffer's preamble, also when they run in another buffer: the dump
+  ;; from the preamble it is given, the retry from the sentinel.
+  (latex-to-svg-backend-tests--with-fake-processes
+    (latex-to-svg-backend-tests--outside-a-project
+      (setq-local latex-to-svg-backend-appended-preamble "\\usepackage{physics}")
+      (setq default-directory "/tmp/paper/")
+      (let* ((doc "$\\dv{f}{x}$")
+             (preamble (latex-to-svg-backend--preamble))
+             (key (latex-to-svg-backend--cache-key doc))
+             (fmt (latex-to-svg-backend--format-file "fake-format"))
+             dumped)
+        (should (string-search "physics" preamble))
+        (cl-letf (((symbol-function 'call-process)
+                   (lambda (&rest args)
+                     (setq dumped (latex-to-svg-backend-tests--tex-source
+                                   (car (last args))))
+                     1))
+                  ((symbol-function 'display-warning) #'ignore))
+          (with-temp-buffer
+            (let ((latex-to-svg-backend-precompile t))
+              (latex-to-svg-backend--ensure-format preamble)))
+          (should (equal dumped (concat preamble "\n\\dump\n"))))
+        (with-temp-file fmt (insert "fake format"))
+        (puthash key (list (latex-to-svg-backend--waiter #'ignore))
+                 latex-to-svg-backend--pending)
+        (cl-letf (((symbol-function 'latex-to-svg-backend--ensure-format)
+                   (lambda (_preamble) fmt))
+                  ((symbol-function 'display-warning) #'ignore))
+          (latex-to-svg-backend--compile key doc)
+          (with-temp-buffer
+            (latex-to-svg-backend-tests--finish-fake-process
+             (car l2s-test-processes) 1 "format compile failed\n"))
+          (should (string-prefix-p
+                   (concat preamble "\n\\begin{document}")
+                   (latex-to-svg-backend-tests--tex-source
+                    (car (last (plist-get (aref (car l2s-test-processes) 3)
+                                          :command)))))))))))
+
+(ert-deftest latex-to-svg-backend-fallback-to-ratex-uses-the-requesting-buffer ()
+  ;; A LaTeX-to-RaTeX fallback starts from the sentinel, in another buffer,
+  ;; and still renders with the requesting buffer's RaTeX macros.
+  (latex-to-svg-backend-tests--with-public-api
+    (setq-local latex-to-svg-backend-ratex-macros "\\def\\vv{\\mathbf{v}}")
+    (let ((doc "$\\vv$"))
+      (latex-to-svg-backend doc :engine 'latex :fallback 'ratex
+                            :font-height 20 :callback #'ignore)
+      (let ((latex (car l2s-test-processes)))
+        (with-temp-file (expand-file-name "equation.log" (aref latex 4))
+          (insert "! Undefined control sequence.\n"))
+        (with-temp-buffer
+          (latex-to-svg-backend-tests--finish-fake-process latex 1)))
+      (let* ((plist (aref (car l2s-test-processes) 3))
+             (command (plist-get plist :command)))
+        (should (equal (car command) "ratex-direct"))
+        (should (string-prefix-p "\\def\\vv{\\mathbf{v}}"
+                                 (with-temp-buffer
+                                   (insert-file-contents (nth 2 command))
+                                   (buffer-string))))
+        ;; The output buffer is named after the key the SVG is stored under.
+        (should (string-search (latex-to-svg-backend--cache-key doc 'ratex)
+                               (buffer-name (plist-get plist :buffer))))))))
+
+(ert-deftest latex-to-svg-backend-invalidate-format-drops-the-buffers-fmt ()
+  ;; The buffer's `.fmt' file goes, with its stamp, its freshness check and
+  ;; its blocklist entry; other preambles' `.fmt' files stay.
+  (latex-to-svg-backend-tests--with-format-cache
+    (latex-to-svg-backend-tests--outside-a-project
+      (let* ((fmt (latex-to-svg-backend--ensure-format
+                   (latex-to-svg-backend--preamble)))
+             (fkey (file-name-base fmt))
+             (other (latex-to-svg-backend--format-file "other")))
+        (with-temp-file other (insert "fmt"))
+        (latex-to-svg-backend--write-format-stamp other binary)
+        (puthash fkey t latex-to-svg-backend--format-blocklist)
+        (latex-to-svg-backend-invalidate-format)
+        (should-not (file-exists-p fmt))
+        (should-not (file-exists-p (latex-to-svg-backend--format-stamp-file fmt)))
+        (should-not (gethash fkey latex-to-svg-backend--format-checked))
+        (should-not (gethash fkey latex-to-svg-backend--format-blocklist))
+        (should (file-exists-p other))
+        (should (file-exists-p (latex-to-svg-backend--format-stamp-file other)))
+        ;; The next compile dumps it again.
+        (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))
+        (should (= builds 2))))))
+
+(ert-deftest latex-to-svg-backend-buffer-local-preamble-end-to-end ()
+  ;; End to end (needs latex + dvisvgm): a buffer-local
+  ;; `-appended-preamble' with a relative `\input' is dumped into the
+  ;; buffer's own `.fmt' file, and its macros typeset.
+  (skip-unless (latex-to-svg-backend-tools-available-p))
+  (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-append-e2e" t))
+         (project (file-name-as-directory
+                   (expand-file-name "my proj_x" latex-to-svg-backend-cache-directory)))
+         (latex-to-svg-backend-precompile t)
+         (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
+         (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal)))
+    (unwind-protect
+        (with-temp-buffer
+          (make-directory project t)
+          (with-temp-file (expand-file-name "macros.tex" project)
+            (insert "\\newcommand{\\RR}{\\mathbb{R}}\n"))
+          (setq default-directory project)
+          (setq-local latex-to-svg-backend-appended-preamble "\\input{macros.tex}")
+          (cl-letf (((symbol-function 'project-current) #'ignore)
+                    ((symbol-function 'latex-to-svg-backend-available-p)
+                     (lambda () t)))
+            (let ((done 'pending)
+                  (doc "$\\RR$"))
+              (latex-to-svg-backend doc :callback (lambda () (setq done t)))
+              (dotimes (_ 200)
+                (when (eq done 'pending) (accept-process-output nil 0.1)))
+              (should (eq done t))
+              (should (file-exists-p
+                       (latex-to-svg-backend--svg-file
+                        (latex-to-svg-backend--cache-key doc))))
+              (should (= 0 (hash-table-count
+                            latex-to-svg-backend--format-blocklist)))
+              (should (file-exists-p
+                       (latex-to-svg-backend--format-file
+                        (latex-to-svg-backend--format-key
+                         (latex-to-svg-backend--preamble))))))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 ;;;; Stamps and collection of the `.fmt' files
@@ -2403,7 +2559,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
          (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
                     (lambda () binary))
                    ((symbol-function 'latex-to-svg-backend--build-format)
-                    (lambda (fkey)
+                    (lambda (fkey _preamble)
                       (cl-incf builds)
                       (let ((f (latex-to-svg-backend--format-file fkey)))
                         (with-temp-file f (insert "fmt"))
@@ -2418,11 +2574,11 @@ The binary is bound to `binary'; the dump is stubbed to write the
   ;; binary and its mtime; another binary, a changed mtime, or no stamp
   ;; dumps it again.  The mtime of the `.fmt' file plays no part.
   (latex-to-svg-backend-tests--with-format-cache
-    (let* ((fmt (latex-to-svg-backend--ensure-format))
+    (let* ((fmt (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))
            (stamp (latex-to-svg-backend--format-stamp-file fmt))
            (new-session (lambda ()
                           (clrhash latex-to-svg-backend--format-checked)
-                          (latex-to-svg-backend--ensure-format))))
+                          (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))))
       (should (= builds 1))
       (should (equal (with-temp-buffer (insert-file-contents stamp)
                                        (read (current-buffer)))
@@ -2453,13 +2609,13 @@ The binary is bound to `binary'; the dump is stubbed to write the
   (latex-to-svg-backend-tests--with-format-cache
     (let ((latex-to-svg-backend--warned (make-hash-table :test 'equal))
           (warnings 0)
-          (fmt (latex-to-svg-backend--ensure-format)))
+          (fmt (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))))
       (with-temp-file (latex-to-svg-backend--format-stamp-file fmt)
         (insert "(:binary \"/x"))
       (clrhash latex-to-svg-backend--format-checked)
       (cl-letf (((symbol-function 'display-warning)
                  (lambda (&rest _) (cl-incf warnings))))
-        (should (equal fmt (latex-to-svg-backend--ensure-format))))
+        (should (equal fmt (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))))
       (should (= builds 2))
       (should (= warnings 1)))))
 
@@ -2481,7 +2637,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
                      (with-temp-file (latex-to-svg-backend--format-file "abc")
                        (insert "fmt"))
                      0)))
-          (let ((fmt (latex-to-svg-backend--build-format "abc")))
+          (let ((fmt (latex-to-svg-backend--build-format "abc" (latex-to-svg-backend--preamble))))
             (should (equal (cdr argv)
                            (list "-ini" "-jobname=abc" "&latex"
                                  (expand-file-name
@@ -2497,7 +2653,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
   ;; Each compile that loads a `.fmt' file bumps its mtime, the GC's last-use
   ;; hint, also after the session has verified it.
   (latex-to-svg-backend-tests--with-format-cache
-    (let* ((fmt (latex-to-svg-backend--ensure-format))
+    (let* ((fmt (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))
            (age (lambda ()
                   (- (float-time)
                      (float-time (file-attribute-modification-time
@@ -2506,7 +2662,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
         (when (eq session 'new)
           (clrhash latex-to-svg-backend--format-checked))
         (set-file-times fmt '(1 0))
-        (should (equal fmt (latex-to-svg-backend--ensure-format)))
+        (should (equal fmt (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))))
         (should (< (funcall age) 60)))
       (should (= builds 1)))))
 
@@ -2514,7 +2670,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
   ;; A `.fmt' file another session collected between the check and the touch
   ;; gives nil: the compile embeds the full preamble.
   (latex-to-svg-backend-tests--with-format-cache
-    (let ((fmt (latex-to-svg-backend--ensure-format)))
+    (let ((fmt (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))))
       (cl-letf (((symbol-function 'set-file-times)
                  (lambda (file &rest _)
                    (signal 'file-missing (list "Setting file times" file)))))
@@ -2523,7 +2679,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
 (ert-deftest latex-to-svg-backend-block-and-flush-delete-format-stamps ()
   ;; A blocked `.fmt' file loses its stamp; a flush deletes every stamp.
   (latex-to-svg-backend-tests--with-format-cache
-    (let* ((fmt (latex-to-svg-backend--ensure-format))
+    (let* ((fmt (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))
            (stamp (latex-to-svg-backend--format-stamp-file fmt))
            (other (latex-to-svg-backend--format-file "other")))
       (cl-letf (((symbol-function 'display-warning) #'ignore))

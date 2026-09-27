@@ -79,7 +79,7 @@ temporary cache directory."
         (progn
           (when (eq engine 'latex)
             (let ((start (float-time)))
-              (latex-to-svg-backend--ensure-format)
+              (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))
               (setq fmt-time (- (float-time) start))))
           (pcase mode
             ('sequential

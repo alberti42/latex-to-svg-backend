@@ -253,11 +253,11 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 | `-cache-max-age` | `-dvisvgm-program` | `-ratex-macros` |
 | `-gc-interval` | `-preamble` | |
 | `-font-scale` | `-appended-preamble` | |
-| `-use-placeholder` | `-preamble-local` | |
+| `-use-placeholder` | `-preamble-not-precompiled` | |
 | | `-line-width` | |
 | `-render-on-non-graphic` | `-metadata-prefix` | |
 | `-svg-dpi` | `-precompile` | |
-| `M-x …-gc`, `…-clear-cache`, `…-invalidate` | `M-x …-flush-format` | |
+| `M-x …-gc`, `…-clear-cache`, `…-invalidate` | `M-x …-flush-format`, `…-invalidate-format` | |
 
 There is no option for the engine: the caller chooses it per call (see [Engines](#engines)).
 
@@ -268,8 +268,8 @@ The functions under [API](#api) work with both; `latex-to-svg-backend-metadata` 
 | `latex-to-svg-backend-latex-program` | `"latex"` | the `latex` binary |
 | `latex-to-svg-backend-dvisvgm-program` | `"dvisvgm"` | the `dvisvgm` binary |
 | `latex-to-svg-backend-preamble` | `standalone[varwidth]` + `amsmath`/`xcolor` | the document class and base packages |
-| `latex-to-svg-backend-appended-preamble` | `""` | extra preamble lines (your macros, packages) appended to the base |
-| `latex-to-svg-backend-preamble-local` | `""` | LaTeX code written after the preamble, set per project — see below |
+| `latex-to-svg-backend-appended-preamble` | `""` | extra preamble lines (your macros, packages) appended to the base — see [A project's preamble](#a-projects-preamble) |
+| `latex-to-svg-backend-preamble-not-precompiled` | `""` | LaTeX code written after the preamble and not dumped into the `.fmt` file — see [A project's preamble](#a-projects-preamble) |
 | `latex-to-svg-backend-line-width` | `nil` | max equation width (LaTeX dim); raise it (e.g. `"20cm"`) so wide numbered equations keep their number on one line — see below |
 | `latex-to-svg-backend-cache-directory` | `$XDG_CACHE_HOME/emacs/latex-to-svg/` | cache root; holds `svg/` (sharded SVGs + sidecars) and `fmt/` (`.fmt` files) — see below |
 | `latex-to-svg-backend-cache-max-age` | `90` | GC deletes equations untouched for this many days (`nil` = no age limit) |
@@ -283,23 +283,39 @@ The functions under [API](#api) work with both; `latex-to-svg-backend-metadata` 
 | `latex-to-svg-backend-ratex-program` | `"render-svg"` | RaTeX's `render-svg` binary |
 | `latex-to-svg-backend-ratex-macros` | `""` | macro definitions put in front of every formula RaTeX renders |
 
-### Per-project macros (`latex-to-svg-backend-preamble-local`)
+### A project's preamble
 
-A LaTeX project usually defines its own macros (`\newcommand`, `\DeclareMathOperator`, a local `.sty`), and its equations fail with the global preamble. Copy what the equations need into `latex-to-svg-backend-preamble-local`, set in the project's `.dir-locals.el`; the recommended value is `\input` of a file of the project's macros:
+A LaTeX project usually defines its own macros (`\newcommand`, `\DeclareMathOperator`, a local `.sty`) and loads its own packages, and its equations fail with the global preamble. The backend reads its options in the buffer that requests an equation, so a project sets them in its `.dir-locals.el`. A project's preamble can go in two places:
+
+| Option | Dumped into a `.fmt` file | Use it for |
+| --- | --- | --- |
+| `latex-to-svg-backend-appended-preamble` | yes: one `.fmt` file per project, which `latex-to-svg-backend-gc` deletes once it is unused | packages, and macros that change rarely |
+| `latex-to-svg-backend-preamble-not-precompiled` | no: written into every compile | macros, when a second `.fmt` file is not wanted |
+
+The first compiles faster, since the packages are read once, at the dump; the second adds no `.fmt` file but is read again on every compile. For example:
 
 ```elisp
-((nil . ((latex-to-svg-backend-preamble-local . "\\input{macros.tex}"))))
+((nil . ((latex-to-svg-backend-appended-preamble . "\\usepackage{physics}\n\\input{macros.tex}"))))
 ```
 
-Every backslash is doubled, as in any Elisp string. `\input` looks for the file in the project root (`project-root`), or in `default-directory` outside a project: the backend writes `\makeatletter\def\input@path{{/path/to/project/}}\makeatother` before the option's text. A file below the root is named relative to it, as in `\input{paper/macros.tex}`. A value that defines `\input@path` itself replaces the backend's; to search one more directory, append to it instead:
+or
+
+```elisp
+((nil . ((latex-to-svg-backend-preamble-not-precompiled . "\\input{macros.tex}"))))
+```
+
+Every backslash is doubled, as in any Elisp string. `\input` looks for the file in the project root (`project-root`), or in `default-directory` outside a project, from either option: the backend writes `\makeatletter\def\input@path{{/path/to/project/}}\makeatother` before the text. A file below the root is named relative to it, as in `\input{paper/macros.tex}`. A value that defines `\input@path` itself replaces the backend's; to search one more directory, append to it instead:
 
 ```latex
 \makeatletter\edef\input@path{\input@path{/other/dir/}}\makeatother
 ```
 
-The option has no `:safe` predicate, as it is LaTeX code: Emacs asks before applying it from a `.dir-locals.el`. It is written into every compile and not dumped into the `.fmt` (see [below](#preamble-precompilation-fmt)), so an edit to `macros.tex` needs no flush of the `.fmt` file; heavy packages belong in `latex-to-svg-backend-appended-preamble`, where they are dumped once. The option and the directory are part of the cache key, so two projects with the same `\input{macros.tex}` do not share SVGs; the contents of `macros.tex` are not, so after editing it the equations have to be compiled again (a front-end's refresh command, or `latex-to-svg-backend-invalidate`). A directory holding one of `\ { } % # ~`, or a remote one (the compile runs locally), gets no `\input@path` and is reported once.
+**After editing a file the preamble loads**, such as `macros.tex`, compile the equations again: the cache key covers the options' text and the directory, not the contents of the files they load, and a `.fmt` file holds those contents as they were at the dump. `C-u M-x latex-to-svg-frontend-refresh` does both for the current buffer: it deletes the buffer's `.fmt` file (`latex-to-svg-backend-invalidate-format`) and compiles its equations again. It does this for the current buffer only; other open files of the project need their own.
 
-The RaTeX engine ignores the option. An equation that uses a project macro fails with RaTeX and, with `:fallback latex`, is typeset by LaTeX, which reads the option.
+- The directory is part of the cache key, and of the `.fmt` file's key when `-preamble` or `-appended-preamble` is set per buffer, so two projects with the same `\input{macros.tex}` share neither SVGs nor `.fmt` files. A buffer with no buffer-local preamble uses the one `.fmt` file everyone shares.
+- A directory holding one of `\ { } % # ~`, or a remote one (the compile runs locally), gets no `\input@path` and is reported once.
+- Neither option has a `:safe` predicate, as both are LaTeX code: Emacs asks before applying them from a `.dir-locals.el`.
+- The RaTeX engine has no preamble and ignores both. An equation that uses a project macro fails with RaTeX and, with `:fallback latex`, is typeset by LaTeX, which reads them. RaTeX's own `latex-to-svg-backend-ratex-macros` can be set per project too.
 
 ### Controlling the width of numbered equations (`latex-to-svg-backend-line-width`)
 

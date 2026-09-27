@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `latex-to-svg-backend-invalidate-format` deletes the `.fmt` file of the
+  current buffer's preamble, with its stamp, and forgets its freshness
+  check and blocklist entry, so the next compile dumps it again. A `.fmt`
+  file holds the files its preamble loads as they were at the dump, and
+  nothing detects an edit to them; clearing the blocklist also retries a
+  preamble whose dump failed. Other preambles' `.fmt` files stay.
+
+### Changed
+
+- `latex-to-svg-backend-preamble-local` is renamed
+  `latex-to-svg-backend-preamble-not-precompiled`, with no obsolete alias:
+  every preamble option can now be set per buffer, and what sets this one
+  apart is that it is not dumped into the `.fmt` file.
+- A buffer-local `latex-to-svg-backend-preamble` or
+  `latex-to-svg-backend-appended-preamble` starts the preamble with the
+  `\input@path` line, so a relative `\input` in it finds its file in the
+  project root, else `default-directory`. The directory is then part of the
+  `.fmt` file's key, so two projects with the same `\input{macros.tex}`
+  get two `.fmt` files. Without a buffer-local value nothing changes.
+
+### Fixed
+
+- `latex-to-svg-backend-preamble`, `-appended-preamble` and `-line-width`
+  set per buffer (in `.dir-locals.el`) had no effect: the cache key used
+  the buffer's value, but the dump and the compile wrote the global one.
+  So did the retry after a failed `.fmt` file, from the process sentinel.
+  A request now reads every option once, in the buffer that makes it.
+- The same for `latex-to-svg-backend-ratex-macros` in a fallback from LaTeX
+  to RaTeX, which starts from the process sentinel.
+
 ## [0.11.0] - 2026-09-27
 
 ### Added
