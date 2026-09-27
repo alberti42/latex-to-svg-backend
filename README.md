@@ -59,7 +59,7 @@ Equation numbering used to be the gap: the AUCTeX-based packages compile a whole
 
 - Emacs 29.1+ with SVG image support.
 - The programs of one of the two [engines](#engines) on `exec-path`:
-  - LaTeX (the default): `latex` and `dvisvgm`, from any TeX distribution. Optionally the `mylatexformat` package (`mylatexformat.ltx`, bundled with most TeX distributions) for preamble precompilation. Absent, the backend simply skips the speedup — see [Preamble precompilation](#preamble-precompilation-fmt).
+  - LaTeX (the default): `latex` and `dvisvgm`, from any TeX distribution.
   - RaTeX: its `render-svg` program. No TeX installation.
 
   Without them, a placeholder panel boxing the raw LaTeX is shown instead (or set `latex-to-svg-backend-use-placeholder`).
@@ -297,7 +297,7 @@ Every backslash is doubled, as in any Elisp string. `\input` looks for the file 
 \makeatletter\edef\input@path{\input@path{/other/dir/}}\makeatother
 ```
 
-The option has no `:safe` predicate, as it is LaTeX code: Emacs asks before applying it from a `.dir-locals.el`. It is written into every compile and not dumped into the `.fmt` (see [below](#preamble-precompilation-fmt)), so an edit to `macros.tex` needs no format flush; heavy packages belong in `latex-to-svg-backend-appended-preamble`, where they are dumped once. The option and the directory are part of the cache key, so two projects with the same `\input{macros.tex}` do not share SVGs; the contents of `macros.tex` are not, so after editing it the equations have to be compiled again (a front-end's refresh command, or `latex-to-svg-backend-invalidate`). A directory holding one of `\ { } % # ~`, or a remote one (the compile runs locally), gets no `\input@path` and is reported once.
+The option has no `:safe` predicate, as it is LaTeX code: Emacs asks before applying it from a `.dir-locals.el`. It is written into every compile and not dumped into the `.fmt` (see [below](#preamble-precompilation-fmt)), so an edit to `macros.tex` needs no flush of the `.fmt` file; heavy packages belong in `latex-to-svg-backend-appended-preamble`, where they are dumped once. The option and the directory are part of the cache key, so two projects with the same `\input{macros.tex}` do not share SVGs; the contents of `macros.tex` are not, so after editing it the equations have to be compiled again (a front-end's refresh command, or `latex-to-svg-backend-invalidate`). A directory holding one of `\ { } % # ~`, or a remote one (the compile runs locally), gets no `\input@path` and is reported once.
 
 The RaTeX engine ignores the option. An equation that uses a project macro fails with RaTeX and, with `:fallback latex`, is typeset by LaTeX, which reads the option.
 
@@ -338,9 +338,9 @@ Three interactive commands manage the cache directly:
 
 ### Preamble precompilation (`.fmt`)
 
-Every equation is its own tiny LaTeX document, so each compile re-reads the class and every package in the preamble (`amsmath`, `xcolor`, and whatever you add via `latex-to-svg-backend-appended-preamble`). That parsing dominates the runtime of a small equation. With `latex-to-svg-backend-precompile` (default `t`) the backend dumps the preamble **once** to a LaTeX format file (`.fmt`) using the [`mylatexformat`](https://ctan.org/pkg/mylatexformat) package, keyed by the preamble text, and every equation compile then loads it via a `%&` first line instead of re-parsing the packages — typically **25–40% faster per equation**, more with a heavier preamble.
+Every equation is its own tiny LaTeX document, so each compile re-reads the class and every package in the preamble (`amsmath`, `xcolor`, and whatever you add via `latex-to-svg-backend-appended-preamble`). That parsing dominates the runtime of a small equation. With `latex-to-svg-backend-precompile` (default `t`) the backend dumps the preamble **once** to a LaTeX `.fmt` file with TeX's own `\dump`, keyed by the preamble text, and every equation compile then loads it via a `%&` first line instead of re-parsing the packages — typically **25–40% faster per equation**, more with a heavier preamble.
 
-It is a pure optimization with a graceful fallback: when `mylatexformat.ltx` isn't on the TeX search path, or the dump fails, or a compile that used the format later fails, the backend transparently reverts to embedding the full preamble. Each dump writes a stamp, `<fkey>.eld`, holding the truename and modification time of the LaTeX binary; when either differs from the current binary (a TeX toolchain upgrade, or another TeX first on `exec-path`), the format is dumped again; `M-x latex-to-svg-backend-flush-format` is the manual escape hatch. Set `latex-to-svg-backend-precompile` to `nil` to disable it entirely.
+It is a pure optimization with a graceful fallback: when the dump fails, or a compile that loaded the `.fmt` file fails, the backend reverts to embedding the full preamble. Each dump writes a stamp, `<fkey>.eld`, holding the truename and modification time of the LaTeX binary; when either differs from the current binary (a TeX toolchain upgrade, or another TeX first on `exec-path`), the `.fmt` file is dumped again; `M-x latex-to-svg-backend-flush-format` is the manual escape hatch. Set `latex-to-svg-backend-precompile` to `nil` to disable it entirely.
 
 The `%&`-loaded `.fmt` approach is borrowed from the work of Karthik Chikmagalur (karthink) and TEC (tecosaur) on fast Org math preview. It started as karthink's proof-of-concept [`org-preview`](https://github.com/karthink/org-preview) (now archived); the `.fmt`-based `org-latex-preview` it grew into lives in a [fork of Org mode](https://code.tecosaur.net/tec/org-mode.git) and is not part of upstream Org.
 

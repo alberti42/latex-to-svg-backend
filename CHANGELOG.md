@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project root (`project-root`), or in `default-directory` outside a
   project: the backend writes `\input@path` for it. The option has no
   `:safe` predicate, so Emacs asks before applying it from a
-  `.dir-locals.el`. It is not dumped into the `.fmt`, so an edit to
-  `macros.tex` needs no format flush. The option and the directory are
+  `.dir-locals.el`. It is not dumped into the `.fmt` file, so an edit to
+  `macros.tex` needs no flush of the `.fmt` file. The option and the directory are
   part of the LaTeX cache key; when the option is empty, the key is
   unchanged. The RaTeX engine ignores it. A directory holding one of
   `\ { } % # ~`, or a remote one, gets no `\input@path` and is reported
@@ -26,16 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- A `.fmt` is stale when the LaTeX binary that dumped it is another one:
-  each dump writes a stamp, `<fkey>.eld` next to the `.fmt`, holding the
-  binary's truename and modification time. The format is dumped again when
-  either differs, which also catches a switch to an older TeX. Before, a
-  `.fmt` older than the binary was stale. Formats dumped by 0.10.0 have no
-  stamp and are dumped once more. `latex-to-svg-backend-flush-format`
+- The preamble is dumped to the `.fmt` file with TeX's own `\dump`. The
+  `mylatexformat` package is no longer used, so precompilation also works
+  on a TeX installation without it.
+- A `.fmt` file is stale when the LaTeX binary that dumped it is another
+  one: each dump writes a stamp, `<fkey>.eld` next to the `.fmt` file,
+  holding the binary's truename and modification time. The `.fmt` file is
+  dumped again when either differs, which also catches a switch to an
+  older TeX. Before, a `.fmt` file older than the binary was stale. The
+  `.fmt` files dumped by 0.10.0 have no stamp and are dumped once more. `latex-to-svg-backend-flush-format`
   deletes the stamps too.
-- `latex-to-svg-backend-gc` also deletes a `.fmt`, with its stamp, when it
-  is older than `latex-to-svg-backend-cache-max-age`, and the log of a dump
-  that failed. Each compile that loads a `.fmt` bumps its modification time.
+- `latex-to-svg-backend-gc` also deletes a `.fmt` file, with its stamp,
+  when it is older than `latex-to-svg-backend-cache-max-age`, and the log
+  of a dump that failed. Each compile that loads a `.fmt` file bumps its
+  modification time.
 
 ## [0.10.0] - 2026-09-26
 

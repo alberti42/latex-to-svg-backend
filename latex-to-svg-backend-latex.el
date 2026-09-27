@@ -130,22 +130,20 @@ The value is folded into the cache key, so changing it re-renders."
   :group 'latex-to-svg-backend-latex)
 
 (defcustom latex-to-svg-backend-precompile t
-  "When non-nil, precompile the preamble to a LaTeX format (`.fmt') file.
+  "When non-nil, precompile the preamble to a LaTeX `.fmt' file.
 
 The class and packages in `latex-to-svg-backend-preamble' /
-`latex-to-svg-backend-appended-preamble' are dumped once, with the
-`mylatexformat' package, to a format file keyed by the preamble text;
-every equation compile then loads it with a `%&' first line instead of
-re-reading the preamble, which speeds each compile up noticeably.
+`latex-to-svg-backend-appended-preamble' are dumped once, with TeX's
+`\\dump', to a `.fmt' file keyed by the preamble text; every equation
+compile then loads it with a `%&' first line instead of re-reading the
+preamble, which speeds each compile up noticeably.
 
-Requires `mylatexformat.ltx' on the TeX search path (part of most TeX
-distributions).  When it is missing, or the dump fails, or a compile
-using the format later fails, the backend transparently falls back to
-embedding the full preamble in each equation — correctness never depends
-on this option.  A format dumped by another LaTeX binary (after a TeX
-toolchain upgrade, or with another TeX on the variable `exec-path') is
-detected and dumped again; `latex-to-svg-backend-flush-format' is the
-manual escape hatch."
+When the dump fails, or a compile that loaded the `.fmt' file fails,
+the backend falls back to embedding the full preamble in each equation —
+correctness never depends on this option.  A `.fmt' file dumped by
+another LaTeX binary (after a TeX toolchain upgrade, or with another TeX
+on the variable `exec-path') is detected and dumped again;
+`latex-to-svg-backend-flush-format' is the manual escape hatch."
   :type 'boolean
   :safe #'booleanp
   :group 'latex-to-svg-backend-latex)
@@ -261,12 +259,12 @@ was before LOCAL existed."
 
 ;;;; Preamble precompilation (.fmt)
 
-;; Speedup: dump the preamble (class + packages) to a LaTeX format file once,
-;; then load it from every equation compile with a `%&' first line instead of
-;; re-reading and re-loading amsmath/xcolor/... each time.  Uses the
-;; `mylatexformat' package.  Entirely optional: on any hiccup the backend
-;; falls back to embedding the full preamble in each equation, so a `.fmt' is
-;; a pure performance optimization, never a correctness dependency.
+;; Speedup: dump the preamble (class + packages) to a LaTeX `.fmt' file once,
+;; with TeX's `\dump', then load it from every equation compile with a `%&'
+;; first line instead of re-reading and re-loading amsmath/xcolor/... each
+;; time.  Entirely optional: on any hiccup the backend falls back to
+;; embedding the full preamble in each equation, so a `.fmt' file is a pure
+;; performance optimization, never a correctness dependency.
 
 (defun latex-to-svg-backend--latex-binary ()
   "Return the path to the LaTeX executable, or nil.
@@ -278,8 +276,8 @@ command name on variable `exec-path'.  Used for the format freshness check."
       (executable-find prog))))
 
 (defun latex-to-svg-backend--latex-format-name ()
-  "Return the base LaTeX format to preload when dumping (e.g. \"latex\").
-The `&NAME' the `-ini' dump reads before `mylatexformat.ltx'."
+  "Return the name of the LaTeX `.fmt' file the dump starts from.
+That is the `&NAME' of the `-ini' run, e.g. \"latex\" for `latex.fmt'."
   (file-name-nondirectory (car (split-string latex-to-svg-backend-latex-program))))
 
 (defun latex-to-svg-backend--format-key ()
@@ -363,30 +361,13 @@ works, it only ages out."
      (latex-to-svg-backend--warn-once "recording format use" err)
      format-file)))
 
-(defun latex-to-svg-backend--precompile-available-p ()
-  "Return non-nil when the preamble can be dumped to a `.fmt'.
-Requires the `mylatexformat' package: `mylatexformat.ltx' must be
-findable via `kpsewhich'.
-
-A `kpsewhich' that exits non-zero just means the package is not installed.
-A `kpsewhich' that cannot be started at all (moved by a toolchain upgrade
-mid-session) is a different matter: it is reported once
-\(`latex-to-svg-backend--warn-once') and treated as unavailable, so the
-backend falls back to full compiles."
-  (and (executable-find "kpsewhich")
-       (eql 0 (condition-case err
-                  (call-process "kpsewhich" nil nil nil "mylatexformat.ltx")
-                (file-error
-                 (latex-to-svg-backend--warn-once
-                  "probing for mylatexformat" err))))))
-
 (defun latex-to-svg-backend--build-format (fkey)
-  "Dump the preamble to a precompiled format file for FKEY, synchronously.
+  "Dump the preamble to the `.fmt' file for FKEY, synchronously.
 Return the `.fmt' path on success, nil on failure.  Writes the preamble
-followed by `\\endofdump' to a scratch `.tex' in the `fmt/' subdirectory
-and runs `latex-to-svg-backend-latex-program' in `-ini' mode with
-`mylatexformat.ltx' to dump `<cache>/fmt/FKEY.fmt'.  The build log is in the
-`*latex-to-svg-backend-precompile-log*' buffer for inspection.
+followed by TeX's `\\dump' to a scratch `.tex' in the `fmt/'
+subdirectory and runs `latex-to-svg-backend-latex-program' on it in
+`-ini' mode, which writes `<cache>/fmt/FKEY.fmt'.  The build log is in
+the `*latex-to-svg-backend-precompile-log*' buffer for inspection.
 
 A preamble that will not dump exits non-zero and yields nil (the caller
 falls back to a full compile, which reports the real LaTeX error).  A LaTeX
@@ -402,7 +383,7 @@ program that cannot be started at all is reported once instead."
     ;; fixed on write rather than declared with `inputenc'.
     (let ((coding-system-for-write 'utf-8-unix))
       (with-temp-file pre-tex
-        (insert (latex-to-svg-backend--preamble) "\n\\endofdump\n")))
+        (insert (latex-to-svg-backend--preamble) "\n\\dump\n")))
     (message "latex-to-svg-backend: precompiling LaTeX preamble...")
     (let ((rv (condition-case err
                   (call-process latex-to-svg-backend-latex-program nil buffer nil
@@ -410,7 +391,7 @@ program that cannot be started at all is reported once instead."
                                 "-ini"
                                 (concat "-jobname=" fkey)
                                 (concat "&" (latex-to-svg-backend--latex-format-name))
-                                "mylatexformat.ltx" pre-tex)
+                                pre-tex)
                 ;; The program was on `exec-path' when the toolchain was
                 ;; checked but cannot be started now (a TeX Live upgrade
                 ;; mid-session moves it).  Report it once; the caller falls
@@ -436,9 +417,9 @@ another LaTeX binary (see `latex-to-svg-backend--format-fresh-p'), as
 after a TeX toolchain upgrade, which would otherwise fail every compile
 with a format-version mismatch.  Bumps the mtime of the format it
 returns (see `latex-to-svg-backend--touch-format').  Returns nil — so
-the caller uses a full compile — when precompilation is off,
-`mylatexformat' is unavailable, the dump fails, or the format has been
-blocklisted after an earlier failure."
+the caller uses a full compile — when precompilation is off, the dump
+fails, or the `.fmt' file has been blocklisted after an earlier
+failure."
   (when latex-to-svg-backend-precompile
     (let ((fkey (latex-to-svg-backend--format-key)))
       (unless (gethash fkey latex-to-svg-backend--format-blocklist)
@@ -455,8 +436,8 @@ blocklisted after an earlier failure."
                      (latex-to-svg-backend--format-fresh-p fmt latex-bin)))
             (puthash fkey t latex-to-svg-backend--format-checked)
             (latex-to-svg-backend--touch-format fmt))
-           ;; Missing or stale -> (re)build, if mylatexformat is available.
-           ((latex-to-svg-backend--precompile-available-p)
+           ;; Missing or stale -> (re)build.
+           (t
             (delete-file fmt)
             (delete-file (latex-to-svg-backend--format-stamp-file fmt))
             (if-let* ((built (latex-to-svg-backend--build-format fkey)))
@@ -621,19 +602,12 @@ re-tints from cache without recompiling."
             ;; Load the precompiled preamble: the `%&' line must be first,
             ;; and names the format file by absolute path without its
             ;; `.fmt' extension.  The class + packages are already in the
-            ;; format, so they are not written here.
-            (progn
-              (insert "%& " (file-name-sans-extension format-file) "\n")
-              ;; The `.fmt' file was dumped by `mylatexformat', whose code
-              ;; it contains.  That code skips the lines up to its
-              ;; `\endofdump' command, else up to `\begin{document}',
-              ;; because a document's preamble is already in the `.fmt'
-              ;; file.  LOCAL is not, so it goes after an `\endofdump'.
-              (unless (string-empty-p local)
-                (insert "\\endofdump\n" local "\n"))
-              (insert "\\begin{document}\n"
-                      latex "\n"
-                      "\\end{document}\n"))
+            ;; `.fmt' file, so they are not written here.
+            (insert "%& " (file-name-sans-extension format-file) "\n"
+                    (if (string-empty-p local) "" (concat local "\n"))
+                    "\\begin{document}\n"
+                    latex "\n"
+                    "\\end{document}\n")
           (insert (latex-to-svg-backend--preamble) "\n"
                   (if (string-empty-p local) "" (concat local "\n"))
                   "\\begin{document}\n"

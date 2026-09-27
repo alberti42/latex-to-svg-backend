@@ -87,9 +87,8 @@ jobs:
     # The end-to-end tests run the real programs: latex, dvisvgm and a
     # `.fmt' dump for the LaTeX engine, RaTeX's `render-svg' for the RaTeX
     # one, and both for the fallback.  The TeX packages are what the
-    # default preamble and the precompilation need: standalone + varwidth +
-    # mylatexformat (latex-extra), xcolor (latex-recommended), amssymb's
-    # fonts (fonts-recommended).  `render-svg' comes from a RaTeX release.
+    # default preamble needs: standalone + varwidth (latex-extra), xcolor
+    # (latex-recommended), amssymb's fonts (fonts-recommended).  `render-svg' comes from a RaTeX release.
     steps:
       - uses: actions/checkout@v4
 
@@ -114,7 +113,6 @@ jobs:
           emacs --version | head -1
           latex --version | head -1
           dvisvgm --version
-          kpsewhich mylatexformat.ltx
           command -v render-svg
 
       # The point of this job is that nothing in it skips.  An Emacs

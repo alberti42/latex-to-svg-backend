@@ -365,26 +365,6 @@
               (should (equal (image-property img2 :scale) 1.5)))))
       (delete-file tmp))))
 
-(ert-deftest latex-to-svg-backend-precompile-available-p-reports-unstartable ()
-  ;; A non-zero exit means `mylatexformat' is not installed -- an answer, not
-  ;; an error.  A `kpsewhich' that cannot be started (moved by a toolchain
-  ;; upgrade mid-session) is an error: reported once, treated as unavailable.
-  (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) "/usr/bin/kpsewhich")))
-    (cl-letf (((symbol-function 'call-process) (lambda (&rest _) 1)))
-      (should-not (latex-to-svg-backend--precompile-available-p)))
-    (let ((warnings 0))
-      (cl-letf (((symbol-function 'call-process)
-                 (lambda (&rest _)
-                   (signal 'file-missing
-                           (list "Searching for program" "No such file or directory"
-                                 "kpsewhich"))))
-                ((symbol-function 'display-warning)
-                 (lambda (&rest _) (cl-incf warnings))))
-        (clrhash latex-to-svg-backend--warned)
-        (should-not (latex-to-svg-backend--precompile-available-p))
-        (should-not (latex-to-svg-backend--precompile-available-p))
-        (should (= 1 warnings))))))
-
 (ert-deftest latex-to-svg-backend-failed-dump-is-not-retried-per-equation ()
   ;; A preamble that will not dump is abandoned for the session: without this,
   ;; every equation pays for another synchronous `latex -ini' run.
@@ -392,9 +372,7 @@
         (builds 0)
         (warnings 0))
     (unwind-protect
-        (cl-letf (((symbol-function 'latex-to-svg-backend--precompile-available-p)
-                   (lambda () t))
-                  ((symbol-function 'latex-to-svg-backend--build-format)
+        (cl-letf (((symbol-function 'latex-to-svg-backend--build-format)
                    (lambda (&rest _) (cl-incf builds) nil))
                   ((symbol-function 'display-warning)
                    (lambda (&rest _) (cl-incf warnings))))
@@ -1329,11 +1307,10 @@ kept for symmetry with the compile pipeline."
                    "BASE\nEXTRA\n\\makeatletter\\def\\sa@width{18cm}\\makeatother"))))
 
 (ert-deftest latex-to-svg-backend-ensure-format-nil-when-disabled ()
-  ;; With precompilation off, no format is produced or consulted (never even
-  ;; probes for mylatexformat).
+  ;; With precompilation off, no `.fmt' file is dumped or consulted.
   (let ((latex-to-svg-backend-precompile nil))
-    (cl-letf (((symbol-function 'latex-to-svg-backend--precompile-available-p)
-               (lambda () (error "must not probe when disabled"))))
+    (cl-letf (((symbol-function 'latex-to-svg-backend--build-format)
+               (lambda (_k) (error "must not dump when disabled"))))
       (should-not (latex-to-svg-backend--ensure-format)))))
 
 (ert-deftest latex-to-svg-backend-ensure-format-builds-once-and-reuses ()
@@ -1349,8 +1326,6 @@ kept for symmetry with the compile pipeline."
                    ;; A binary older than the about-to-be-built .fmt.
                    (lambda () (let ((f (make-temp-file "l2s-bin")))
                                 (set-file-times f '(1 0)) f)))
-                  ((symbol-function 'latex-to-svg-backend--precompile-available-p)
-                   (lambda () t))
                   ((symbol-function 'latex-to-svg-backend--build-format)
                    (lambda (fkey)
                      (cl-incf builds)
@@ -1382,8 +1357,6 @@ kept for symmetry with the compile pipeline."
           (set-file-times fmt '(1 0))
           (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
                      (lambda () newer-bin))
-                    ((symbol-function 'latex-to-svg-backend--precompile-available-p)
-                     (lambda () t))
                     ((symbol-function 'latex-to-svg-backend--build-format)
                      (lambda (k)
                        (cl-incf builds)
@@ -1440,11 +1413,9 @@ kept for symmetry with the compile pipeline."
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-precompiled-compile-end-to-end ()
-  ;; End to end (needs latex + dvisvgm + mylatexformat): a real compile through
-  ;; the precompiled preamble produces the SVG, and the `.fmt' is left cached.
-  (skip-unless (and (latex-to-svg-backend-tools-available-p)
-                    (let ((latex-to-svg-backend-precompile t))
-                      (latex-to-svg-backend--precompile-available-p))))
+  ;; End to end (needs latex + dvisvgm): a real compile through the
+  ;; precompiled preamble produces the SVG, and the `.fmt' is left cached.
+  (skip-unless (latex-to-svg-backend-tools-available-p))
   (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-fmt-e2e" t))
         (latex-to-svg-backend-precompile t)
         (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
@@ -2302,11 +2273,10 @@ NEWEST is a function returning the most recently started fake process."
         (should (string-match-p "remote" (nth 1 (car warnings))))))))
 
 (ert-deftest latex-to-svg-backend-compile-writes-the-local-preamble ()
-  ;; Without a format the local text follows the preamble.  With one it
-  ;; follows `\endofdump', since `mylatexformat' skips the document up to
-  ;; it (else up to `\begin{document}').  The retry after a failed format
-  ;; runs from the sentinel, in another buffer, and still writes the
-  ;; requesting buffer's text.
+  ;; The local text goes before `\begin{document}': after the `%&' line
+  ;; with a `.fmt' file, after the preamble without.  The retry after a
+  ;; failed `.fmt' file runs from the sentinel, in another buffer, and
+  ;; still writes the requesting buffer's text.
   (latex-to-svg-backend-tests--with-fake-processes
     (latex-to-svg-backend-tests--outside-a-project
       (setq-local latex-to-svg-backend-preamble-local "\\input{macros.tex}")
@@ -2328,7 +2298,7 @@ NEWEST is a function returning the most recently started fake process."
           (latex-to-svg-backend--compile key doc)
           (should (equal (funcall source)
                          (concat "%& " (file-name-sans-extension fmt) "\n"
-                                 "\\endofdump\n" local "\n"
+                                 local "\n"
                                  "\\begin{document}\n" doc "\n"
                                  "\\end{document}\n")))
           (with-temp-buffer
@@ -2374,11 +2344,10 @@ NEWEST is a function returning the most recently started fake process."
                               :font-height 20 :callback #'ignore))))))))
 
 (ert-deftest latex-to-svg-backend-local-preamble-end-to-end ()
-  ;; End to end (needs latex + dvisvgm + mylatexformat): project macros
-  ;; `\input' from a directory with a space and an underscore in its name,
-  ;; one file below it, with the precompiled preamble and without.
-  (skip-unless (and (latex-to-svg-backend-tools-available-p)
-                    (latex-to-svg-backend--precompile-available-p)))
+  ;; End to end (needs latex + dvisvgm): project macros `\input' from a
+  ;; directory with a space and an underscore in its name, one file below
+  ;; it, with the precompiled preamble and without.
+  (skip-unless (latex-to-svg-backend-tools-available-p))
   (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-local-e2e" t))
          (project (file-name-as-directory
                    (expand-file-name "my proj_x" latex-to-svg-backend-cache-directory)))
@@ -2433,8 +2402,6 @@ The binary is bound to `binary'; the dump is stubbed to write the
      (unwind-protect
          (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
                     (lambda () binary))
-                   ((symbol-function 'latex-to-svg-backend--precompile-available-p)
-                    (lambda () t))
                    ((symbol-function 'latex-to-svg-backend--build-format)
                     (lambda (fkey)
                       (cl-incf builds)
@@ -2497,24 +2464,30 @@ The binary is bound to `binary'; the dump is stubbed to write the
       (should (= warnings 1)))))
 
 (ert-deftest latex-to-svg-backend-build-format-writes-the-stamp ()
-  ;; A successful dump writes the stamp next to the `.fmt'.
+  ;; The dump runs `latex -ini' on the preamble followed by TeX's `\dump',
+  ;; and a successful one writes the stamp next to the `.fmt'.
   (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-dump" t))
          (binary (make-temp-file "l2s-bin"))
-         (inhibit-message t))
+         (inhibit-message t)
+         argv source)
     (unwind-protect
         (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
                    (lambda () binary))
                   ((symbol-function 'call-process)
                    (lambda (_program _infile _buffer _display &rest args)
-                     (let ((jobname (seq-some
-                                     (lambda (a)
-                                       (and (string-prefix-p "-jobname=" a)
-                                            (substring a 9)))
-                                     args)))
-                       (with-temp-file (latex-to-svg-backend--format-file jobname)
-                         (insert "fmt")))
+                     (setq argv args
+                           source (latex-to-svg-backend-tests--tex-source
+                                   (car (last args))))
+                     (with-temp-file (latex-to-svg-backend--format-file "abc")
+                       (insert "fmt"))
                      0)))
           (let ((fmt (latex-to-svg-backend--build-format "abc")))
+            (should (equal (cdr argv)
+                           (list "-ini" "-jobname=abc" "&latex"
+                                 (expand-file-name
+                                  "abc.tex" (latex-to-svg-backend--fmt-dir)))))
+            (should (equal source (concat (latex-to-svg-backend--preamble)
+                                          "\n\\dump\n")))
             (should (equal fmt (latex-to-svg-backend--format-file "abc")))
             (should (latex-to-svg-backend--format-fresh-p fmt binary))))
       (delete-file binary)
