@@ -142,6 +142,19 @@ the same undisplayed SVG), which made preview sizing non-deterministic."
   :safe #'numberp
   :group 'latex-to-svg-backend)
 
+;; Not `:safe': the queue is shared by every buffer, and a compile starts
+;; from whichever sentinel frees a slot, so a buffer-local value would be
+;; read in an unrelated buffer.
+(defcustom latex-to-svg-backend-jobs nil
+  "Maximum number of compiles to run at once.
+nil uses the number of processors (`num-processors').  Further
+compiles wait in a queue and start, oldest first, as running ones
+end.  A compile holds its place from its first process to its last:
+`latex' and `dvisvgm', or `render-svg'."
+  :type '(choice (const :tag "Number of processors" nil)
+                 (natnum :tag "Compiles"))
+  :group 'latex-to-svg-backend)
+
 ;;;; State
 
 ;; image-cache key = content key (sha1 of latex + preamble + style) plus the
@@ -159,7 +172,18 @@ the same undisplayed SVG), which made preview sizing non-deterministic."
 ;; records every consumer to notify once the SVG is ready, or to report to
 ;; when the compile fails.
 (defvar latex-to-svg-backend--pending (make-hash-table :test 'equal)
-  "In-memory map of cache key to waiters awaiting an in-flight compile.")
+  "In-memory map of cache key to waiters awaiting a queued or running compile.")
+
+;; At most `latex-to-svg-backend-jobs' compiles run at once (see
+;; `latex-to-svg-backend--schedule').  A compile holds its slot until
+;; `latex-to-svg-backend--compile-done', across all its processes and the
+;; LaTeX engine's retry without a `.fmt' file.
+(defvar latex-to-svg-backend--queue nil
+  "Compiles waiting for a slot, oldest first, as (KEY . START) conses.
+START is a function of no arguments that starts the compile of KEY.")
+
+(defvar latex-to-svg-backend--running nil
+  "Content keys of the compiles holding a slot.")
 
 (defun latex-to-svg-backend--waiter (callback &optional quiet fallback)
   "Return a waiter for CALLBACK, requested from the current buffer.
@@ -775,6 +799,42 @@ which an engine reads to tell a formula it rejects from a crash."
                (funcall done nil)))))))
     (run stages)))
 
+;;;; Compile slots
+
+(defun latex-to-svg-backend--jobs ()
+  "Return how many compiles may run at once (see `latex-to-svg-backend-jobs')."
+  (max 1 (or latex-to-svg-backend-jobs (num-processors))))
+
+(defun latex-to-svg-backend--schedule (key start)
+  "Start the compile of KEY by calling START once a slot is free.
+START is a function of no arguments.  Compiles start in the order they
+were scheduled."
+  (setq latex-to-svg-backend--queue
+        (nconc latex-to-svg-backend--queue (list (cons key start))))
+  (latex-to-svg-backend--fill-slots))
+
+(defun latex-to-svg-backend--fill-slots ()
+  "Start queued compiles while a slot is free."
+  (while (and latex-to-svg-backend--queue
+              (< (length latex-to-svg-backend--running)
+                 (latex-to-svg-backend--jobs)))
+    (pcase-let ((`(,key . ,start) (pop latex-to-svg-backend--queue)))
+      (push key latex-to-svg-backend--running)
+      (latex-to-svg-backend--start-compile key start))))
+
+(defun latex-to-svg-backend--start-compile (key start)
+  "Call START, which starts the compile of KEY in the slot KEY holds.
+A compile that cannot start (its scratch directory cannot be created,
+say) is reported once per session and ended (see
+`latex-to-svg-backend--compile-done'), so its slot is freed and the next
+request for KEY compiles again.  It is reported, not signaled: START
+often runs from the sentinel of the compile that freed the slot."
+  (condition-case err
+      (funcall start)
+    (error
+     (latex-to-svg-backend--warn-once "starting a compile" err)
+     (latex-to-svg-backend--compile-done key))))
+
 ;;;; Compile outcome
 
 (defun latex-to-svg-backend--engine-name (engine)
@@ -794,10 +854,15 @@ reported and does not keep the others from running."
        (message "latex-to-svg-backend: callback error: %S" cb-err)))))
 
 (defun latex-to-svg-backend--compile-done (key)
-  "Forget the waiters of KEY's compile, which has ended.
+  "End KEY's compile: forget its waiters and free its slot.
 Called once the waiters were notified or the failure handled, so a
-request for KEY from now on finds the SVG or compiles again."
-  (remhash key latex-to-svg-backend--pending))
+request for KEY from now on finds the SVG or compiles again.  The freed
+slot starts the oldest queued compile."
+  (remhash key latex-to-svg-backend--pending)
+  (when (member key latex-to-svg-backend--running)
+    (setq latex-to-svg-backend--running
+          (delete key latex-to-svg-backend--running))
+    (latex-to-svg-backend--fill-slots)))
 
 (defun latex-to-svg-backend--report-failure (key latex engine &optional buffer)
   "Warn that ENGINE could not compile LATEX, whose content key is KEY.

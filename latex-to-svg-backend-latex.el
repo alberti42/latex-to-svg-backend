@@ -736,8 +736,11 @@ re-tints from cache without recompiling."
            (when (buffer-live-p output-buffer)
              (kill-buffer output-buffer))
            (funcall cleanup))
+         ;; The retry keeps the slot of this compile.
          (when retry-format
-           (latex-to-svg-backend--compile key latex metadata inputs t)))))))
+           (latex-to-svg-backend--start-compile
+            key (lambda ()
+                  (latex-to-svg-backend--compile key latex metadata inputs t)))))))))
 
 (provide 'latex-to-svg-backend-latex)
 

@@ -604,6 +604,8 @@
   ;; nil, schedules ONE compile, and queues every callback for the same
   ;; content key onto it.
   (let ((latex-to-svg-backend--pending (make-hash-table :test 'equal))
+        (latex-to-svg-backend--queue nil)
+        (latex-to-svg-backend--running nil)
         (compiles 0))
     (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
               ((symbol-function 'latex-to-svg-backend-tools-available-p)
@@ -687,6 +689,8 @@ completion event."
           (latex-to-svg-backend-latex-program "latex-direct")
           (latex-to-svg-backend-dvisvgm-program "dvisvgm-direct")
           (latex-to-svg-backend--pending (make-hash-table :test 'equal))
+          (latex-to-svg-backend--queue nil)
+          (latex-to-svg-backend--running nil)
           (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
           (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal))
           (latex-to-svg-backend--warned (make-hash-table :test 'equal))
@@ -926,6 +930,8 @@ completion event."
                  (lambda (_preamble)
                    (cl-incf ensure-calls)
                    fmt)))
+        ;; As `--fill-slots' does: the compile holds a slot.
+        (push key latex-to-svg-backend--running)
         (latex-to-svg-backend--compile key doc 7)
         (let* ((first-process (car l2s-test-processes))
                (first-plist (aref first-process 3))
@@ -943,6 +949,8 @@ completion event."
           (should (gethash "fake-format"
                            latex-to-svg-backend--format-blocklist))
           (should (gethash key latex-to-svg-backend--pending))
+          ;; The retry keeps the slot.
+          (should (equal latex-to-svg-backend--running (list key)))
           (should (= callbacks 0))
           (should-not (file-directory-p first-scratch))
           (should-not (buffer-live-p first-buffer))
@@ -972,8 +980,67 @@ completion event."
             (should (= callbacks 1))
             (should (equal metadata-seen '(:nums (7 . 7))))
             (should-not (gethash key latex-to-svg-backend--pending))
+            (should-not latex-to-svg-backend--running)
             (should-not (file-directory-p retry-scratch))
             (should-not (buffer-live-p retry-buffer))))))))
+
+(ert-deftest latex-to-svg-backend-runs-at-most-jobs-compiles ()
+  ;; With two slots a third equation waits, and a second request for it
+  ;; joins the queued compile.  When a compile ends, failed here, the
+  ;; queued one starts.
+  (latex-to-svg-backend-tests--with-fake-processes
+    (let* ((latex-to-svg-backend-jobs 2)
+           (latex-to-svg-backend-ratex-program "ratex-direct")
+           (latex-to-svg-backend-ratex-macros "")
+           (docs '("$a$" "$b$" "$c$"))
+           (keys (mapcar (lambda (doc)
+                           (latex-to-svg-backend--cache-key doc 'ratex))
+                         docs)))
+      (dolist (doc (append docs '("$c$")))
+        (latex-to-svg-backend--enqueue
+         (latex-to-svg-backend--cache-key doc 'ratex) doc
+         (latex-to-svg-backend--waiter #'ignore t) nil 'ratex))
+      (should (= (length l2s-test-processes) 2))
+      (should (equal (mapcar #'car latex-to-svg-backend--queue)
+                     (list (nth 2 keys))))
+      (should (= 2 (length (gethash (nth 2 keys)
+                                    latex-to-svg-backend--pending))))
+      ;; `render-svg' for $a$ exits without an SVG.
+      (latex-to-svg-backend-tests--finish-fake-process
+       (car (last l2s-test-processes)) 0)
+      (should (= (length l2s-test-processes) 3))
+      (should-not latex-to-svg-backend--queue)
+      (should (equal (sort (copy-sequence latex-to-svg-backend--running)
+                           #'string<)
+                     (sort (list (nth 1 keys) (nth 2 keys)) #'string<))))))
+
+(ert-deftest latex-to-svg-backend-compile-that-cannot-start-frees-its-slot ()
+  ;; A compile that signals as it starts is reported once and ended, so
+  ;; its slot goes to the next one and a later request compiles again.
+  (let ((latex-to-svg-backend-jobs 1)
+        (latex-to-svg-backend--pending (make-hash-table :test 'equal))
+        (latex-to-svg-backend--queue nil)
+        (latex-to-svg-backend--running nil)
+        (latex-to-svg-backend--warned (make-hash-table :test 'equal))
+        (warnings nil)
+        (started nil))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (&rest warning) (push warning warnings))))
+      (puthash "a" (list (latex-to-svg-backend--waiter #'ignore))
+               latex-to-svg-backend--pending)
+      (latex-to-svg-backend--schedule
+       "a" (lambda () (error "No scratch directory")))
+      (latex-to-svg-backend--schedule "b" (lambda () (push "b" started)))
+      (should (equal started '("b")))
+      (should (equal latex-to-svg-backend--running '("b")))
+      (should-not (gethash "a" latex-to-svg-backend--pending))
+      (should (= (length warnings) 1)))))
+
+(ert-deftest latex-to-svg-backend-jobs-defaults-to-the-processors ()
+  (let ((latex-to-svg-backend-jobs nil))
+    (should (= (latex-to-svg-backend--jobs) (num-processors))))
+  (let ((latex-to-svg-backend-jobs 0))
+    (should (= (latex-to-svg-backend--jobs) 1))))
 
 ;;;; End-to-end (requires latex + dvisvgm; skipped otherwise)
 
@@ -1663,6 +1730,8 @@ Return the SVG path."
   ;; `-metadata' name the entry of the engine they are given.
   (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-engine" t))
          (latex-to-svg-backend--pending (make-hash-table :test 'equal))
+         (latex-to-svg-backend--queue nil)
+         (latex-to-svg-backend--running nil)
          (latex-to-svg-backend-ratex-macros "")
          (doc "$x$")
          (latex-key (latex-to-svg-backend--cache-key doc 'latex))

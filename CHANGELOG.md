@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `latex-to-svg-backend-jobs` is the maximum number of compiles to run at
+  once, by default the number of processors (`num-processors`). Further
+  compiles wait in a queue and start, oldest first, as running ones end.
+  Before, every equation that was not cached started its compile at once,
+  so a document with hundreds of new equations started hundreds of `latex`
+  processes together.
+
+### Changed
+
+- A compile that cannot start (its scratch directory cannot be created,
+  say) is reported once per session instead of signaling to the caller,
+  since it may now start from the sentinel of another compile.
+
 ## [0.11.1] - 2026-09-27
 
 ### Added

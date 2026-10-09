@@ -162,7 +162,7 @@ In a running Emacs, load `dev/latex-to-svg-backend-benchmark.el` and call `M-x l
 
 `LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the backend is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
 
-Returns an image now when one can be produced synchronously (cache / on-disk SVG / placeholder), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile.
+Returns an image now when one can be produced synchronously (cache / on-disk SVG / placeholder), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile. At most `latex-to-svg-backend-jobs` compiles run at once; further compiles wait in a queue and start, oldest first, as running ones end.
 
 `ENGINE` is `latex` (the default, also `nil`) or `ratex`; see [Engines](#engines). Any other value signals an error. `FALLBACK` names an engine that typesets `LATEX` when `ENGINE` rejects it, and `QUIET` drops the warning a failed compile gives; see [Failed compiles](#failed-compiles-and-the-fallback-engine).
 
@@ -254,7 +254,7 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 | `-gc-interval` | `-preamble` | |
 | `-font-scale` | `-appended-preamble` | |
 | `-use-placeholder` | `-preamble-not-precompiled` | |
-| | `-line-width` | |
+| `-jobs` | `-line-width` | |
 | `-render-on-non-graphic` | `-metadata-prefix` | |
 | `-svg-dpi` | `-precompile` | |
 | `M-x …-gc`, `…-clear-cache`, `…-invalidate` | `M-x …-flush-format`, `…-invalidate-format` | |
@@ -278,6 +278,7 @@ The functions under [API](#api) work with both; `latex-to-svg-backend-metadata` 
 | `latex-to-svg-backend-use-placeholder` | `nil` | force the raw-LaTeX placeholder instead of compiling |
 | `latex-to-svg-backend-render-on-non-graphic` | `nil` | allow rendering on a non-graphical frame |
 | `latex-to-svg-backend-svg-dpi` | `96.0` | points→pixels constant for sizing; rarely needs changing |
+| `latex-to-svg-backend-jobs` | `nil` | maximum number of compiles to run at once (`nil` = the number of processors); further compiles wait in a queue |
 | `latex-to-svg-backend-metadata-prefix` | `nil` | `nil` = off; the `\typeout` prefix enabling `.eld` compile-metadata capture (above) |
 | `latex-to-svg-backend-precompile` | `t` | preamble precompilation to a `.fmt` (below) |
 | `latex-to-svg-backend-ratex-program` | `"render-svg"` | RaTeX's `render-svg` binary |

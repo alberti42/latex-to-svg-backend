@@ -70,6 +70,8 @@ temporary cache directory."
          (latex-to-svg-backend-render-on-non-graphic t)
          (latex-to-svg-backend-metadata-prefix nil)
          (latex-to-svg-backend--pending (make-hash-table :test 'equal))
+         (latex-to-svg-backend--queue nil)
+         (latex-to-svg-backend--running nil)
          (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
          (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal))
          (pending latex-to-svg-backend--pending)

@@ -207,7 +207,7 @@ display time), so neither size nor color is part of this key."
 ;;;; Compile queue
 
 (defun latex-to-svg-backend--enqueue (key latex waiter &optional metadata engine inputs)
-  "Queue WAITER for KEY and start a compile if none is running.
+  "Queue WAITER for KEY and schedule a compile if none is queued or running.
 
 KEY identifies the equation; WAITER is what to notify (see
 `latex-to-svg-backend--waiter').  LATEX is forwarded to the compile of
@@ -217,15 +217,28 @@ for the `.eld' sidecar), or `latex-to-svg-backend--ratex-compile',
 which writes no sidecar; both along with INPUTS (as for
 `latex-to-svg-backend--cache-key').
 Multiple waiters sharing KEY (the same equation requested more than
-once) are coalesced onto a single in-flight compile; all are notified
-when it finishes."
-  (let ((pending (gethash key latex-to-svg-backend--pending)))
+once) are coalesced onto a single compile; all are notified when it
+finishes.
+
+The compile waits for a slot (see `latex-to-svg-backend--schedule') and
+may start from the sentinel of another compile.  So INPUTS, nil meaning
+the current buffer's, is read now, and the compile starts in WAITER's
+requesting buffer while that is live, where it reads the options that
+INPUTS does not hold."
+  (let ((pending (gethash key latex-to-svg-backend--pending))
+        (inputs (or inputs (latex-to-svg-backend--inputs)))
+        (buffer (plist-get waiter :buffer)))
     (puthash key (cons waiter pending) latex-to-svg-backend--pending)
     (unless pending
-      (pcase-exhaustive engine
-        ((or 'nil 'latex)
-         (latex-to-svg-backend--compile key latex metadata inputs))
-        ('ratex (latex-to-svg-backend--ratex-compile key latex inputs))))))
+      (latex-to-svg-backend--schedule
+       key
+       (lambda ()
+         (with-current-buffer (if (buffer-live-p buffer) buffer (current-buffer))
+           (pcase-exhaustive engine
+             ((or 'nil 'latex)
+              (latex-to-svg-backend--compile key latex metadata inputs))
+             ('ratex
+              (latex-to-svg-backend--ratex-compile key latex inputs)))))))))
 
 ;;;; Failed compiles and the fallback engine
 
