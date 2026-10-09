@@ -139,15 +139,17 @@ success, nil when the output has no SVG root element."
 ;;;; Compile
 
 (defun latex-to-svg-backend--texres-toolchain ()
-  "Return the toolchain of the texres engine, or signal an error.
+  "Return the toolchain of the texres engine.
 That is texres's `pdflatex', then `pdftocairo -svg -noshrink' (see
 `latex-to-svg-backend--latex-toolchain' for the plist).  Without
 `-noshrink', `pdftocairo' scales a small page's content down by a
-few percent."
+few percent.  When there is no link (see
+`latex-to-svg-backend--texres-link'), texres is run by its own name,
+so a texres that is not found fails to start, as any missing program
+does (see `latex-to-svg-backend--compile-failed')."
   (list :engine 'texres
         :program (or (latex-to-svg-backend--texres-link)
-                     (error "Cannot find texres: %s"
-                            latex-to-svg-backend-texres-program))
+                     latex-to-svg-backend-texres-program)
         :output "equation.pdf"
         :prefix latex-to-svg-backend--texres-ink
         :convert (lambda (dir pdf _svg)

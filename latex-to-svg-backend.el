@@ -297,60 +297,18 @@ KEY is a content key (see `latex-to-svg-backend--cache-key').  See
 `latex-to-svg-backend--record-failure'."
   (plist-get (latex-to-svg-backend--sidecar key) :failed))
 
-(defun latex-to-svg-backend--fallback-unavailable (key latex engine fallback buffer quiet)
-  "Report that LATEX failed with ENGINE and FALLBACK cannot be run.
-KEY is the content key of LATEX and ENGINE, and BUFFER the requesting
-buffer, or nil when it was killed.  The missing programs are a
-configuration problem, reported once per session even when QUIET is
-non-nil; the failure of LATEX is reported as any other unless QUIET."
-  (when (latex-to-svg-backend--mark-once
-         (format "fallback unavailable/%s" fallback))
-    (display-warning
-     'latex-to-svg-backend
-     (format "Falling back to %s needs %s, which %s not found.
-Install %s (see %s), or turn off the fallback option of the package \
-that shows the equations."
-             (latex-to-svg-backend--engine-name fallback)
-             (pcase-exhaustive fallback
-               ('latex (format "`%s' and `%s'"
-                               latex-to-svg-backend-latex-program
-                               latex-to-svg-backend-dvisvgm-program))
-               ('ratex (format "`%s'" latex-to-svg-backend-ratex-program))
-               ('texres (format "`%s' and `%s'"
-                                latex-to-svg-backend-texres-program
-                                latex-to-svg-backend-pdftocairo-program)))
-             (if (eq fallback 'ratex) "was" "were")
-             (if (eq fallback 'ratex) "it" "them")
-             (pcase-exhaustive fallback
-               ('latex "`latex-to-svg-backend-latex-program' and \
-`latex-to-svg-backend-dvisvgm-program'")
-               ('ratex "`latex-to-svg-backend-ratex-program'")
-               ('texres "`latex-to-svg-backend-texres-program' and \
-`latex-to-svg-backend-pdftocairo-program'")))
-     :warning))
-  (unless quiet
-    (latex-to-svg-backend--report-failure key latex engine buffer)))
-
-(defun latex-to-svg-backend--fall-back (latex engine fallback metadata waiter inputs)
-  "Take WAITER's request for LATEX over from ENGINE to FALLBACK.
-Called from the compile sentinel once ENGINE rejected LATEX (see
-`latex-to-svg-backend--compile-failed').  INPUTS is the requesting
-buffer's plist of `latex-to-svg-backend--inputs', read when the request
-was made: the sentinel's current buffer is another.  LATEX
+(defun latex-to-svg-backend--fall-back (latex fallback metadata waiter inputs)
+  "Take WAITER's request for LATEX over to the engine FALLBACK.
+Called from the compile sentinel once the requested engine rejected
+LATEX (see `latex-to-svg-backend--compile-failed').  INPUTS is the
+requesting buffer's plist of `latex-to-svg-backend--inputs', read when
+the request was made: the sentinel's current buffer is another.  LATEX
 is compiled with FALLBACK under FALLBACK's own cache key, along with
 METADATA, and WAITER's callback fires when that SVG is ready; the caller then
 re-queries and `latex-to-svg-backend' finds it.  When FALLBACK's SVG, or
-its failure record, is there already, the callback fires now.  When
-FALLBACK's programs are missing, that is reported (see
-`latex-to-svg-backend--fallback-unavailable')."
-  (let ((key (latex-to-svg-backend--cache-key latex engine inputs))
-        (fallback-key (latex-to-svg-backend--cache-key latex fallback inputs))
-        (buffer (plist-get waiter :buffer)))
+its failure record, is there already, the callback fires now."
+  (let ((fallback-key (latex-to-svg-backend--cache-key latex fallback inputs)))
     (cond
-     ((not (latex-to-svg-backend-tools-available-p fallback))
-      (latex-to-svg-backend--fallback-unavailable
-       key latex engine fallback (and (buffer-live-p buffer) buffer)
-       (plist-get waiter :quiet)))
      ((or (file-exists-p (latex-to-svg-backend--svg-file fallback-key))
           (latex-to-svg-backend--failed-p fallback-key))
       (funcall (plist-get waiter :callback)))
@@ -417,14 +375,15 @@ that typesets LATEX when ENGINE has rejected it: under its own cache
 key, so a later request with the same ENGINE and FALLBACK returns the
 fallback's picture from cache.  The same LATEX must then be valid for
 FALLBACK; a macro defined only in `latex-to-svg-backend-ratex-macros'
-fails with LaTeX too.  When FALLBACK's programs are missing, that is
-warned about once per session.  The first fallback picture in a buffer
+fails with LaTeX too.  The first fallback picture in a buffer
 is announced with a message naming how many fell back.
 `latex-to-svg-backend-engine-used' says which engine drew a picture.
 
 A failed compile warns once per equation per buffer, naming the buffer
 and linking to the log; QUIET non-nil drops that warning for this call.
-Configuration problems, such as missing fallback programs, still warn.
+A program that is not found, ENGINE's or FALLBACK's, still warns, once
+per session per engine and program; the request then returns nil, and
+the next request runs the program again.
 
 METADATA, when non-nil and `latex-to-svg-backend-metadata-prefix' is set, is the
 INITIAL value stored in this equation's `.eld' sidecar (see
@@ -480,8 +439,7 @@ otherwise (see `latex-to-svg-backend--ratex-delimiters').
 Returns immediately with:
 
   * the placeholder panel image, when `latex-to-svg-backend-use-placeholder'
-    is set or the engine's programs are unavailable (see
-    `latex-to-svg-backend--placeholder');
+    is set (see `latex-to-svg-backend--placeholder');
   * the cached / on-disk equation image when it is ready, or FALLBACK's
     when ENGINE failed;
   * nil when equations aren't renderable (see
@@ -505,8 +463,7 @@ engines also read their options there (see
     (setq fallback nil))
   (when (latex-to-svg-backend-available-p)
     (cond
-     ((or latex-to-svg-backend-use-placeholder
-          (not (latex-to-svg-backend-tools-available-p engine)))
+     (latex-to-svg-backend-use-placeholder
       (latex-to-svg-backend--placeholder latex))
      (t
       (let* ((inputs (latex-to-svg-backend--inputs))
@@ -529,10 +486,6 @@ engines also read their options there (see
               (latex-to-svg-backend--report-failure
                key latex engine (current-buffer)))
             nil)
-           ((not (latex-to-svg-backend-tools-available-p fallback))
-            (latex-to-svg-backend--fallback-unavailable
-             key latex engine fallback (current-buffer) quiet)
-            nil)
            (t
             (let ((image (latex-to-svg-backend
                           latex :callback callback :metadata metadata
@@ -554,7 +507,7 @@ engines also read their options there (see
                 (and fallback
                      (lambda (waiter)
                        (latex-to-svg-backend--fall-back
-                        latex engine fallback metadata waiter inputs))))
+                        latex fallback metadata waiter inputs))))
                metadata engine inputs))
             nil)))))))
 

@@ -419,8 +419,10 @@ subdirectory and runs the TeX PROGRAM on it in `-ini' mode (by default
 the `*latex-to-svg-backend-precompile-log*' buffer for inspection.
 
 A preamble that will not dump exits non-zero and yields nil (the caller
-falls back to a full compile, which reports the real LaTeX error).  A LaTeX
-program that cannot be started at all is reported once instead."
+falls back to a full compile, which reports the real LaTeX error).  A
+TeX program that is not found signals `file-missing', which
+`latex-to-svg-backend--ensure-format' handles; one that is found but
+cannot be started is reported once."
   (let* ((dir (latex-to-svg-backend--fmt-dir))
          (base (expand-file-name fkey dir))
          (fmt (concat base ".fmt"))
@@ -434,23 +436,24 @@ program that cannot be started at all is reported once instead."
       (with-temp-file pre-tex
         (insert preamble "\n\\dump\n")))
     (message "latex-to-svg-backend: precompiling LaTeX preamble...")
-    (let ((rv (condition-case err
-                  (call-process (or program latex-to-svg-backend-latex-program)
-                                nil buffer nil
-                                (concat "-output-directory=" dir)
-                                "-ini"
-                                (concat "-jobname=" fkey)
-                                (concat "&" (latex-to-svg-backend--latex-format-name
-                                             program))
-                                pre-tex)
-                ;; The program was on `exec-path' when the toolchain was
-                ;; checked but cannot be started now (a TeX Live upgrade
-                ;; mid-session moves it).  Report it once; the caller falls
-                ;; back to a full compile, which reports its own failure.
-                (file-error
-                 (latex-to-svg-backend--warn-once
-                  "dumping the LaTeX preamble" err)))))
-      (delete-file pre-tex)
+    (let ((rv (unwind-protect
+                  (condition-case err
+                      (call-process (or program latex-to-svg-backend-latex-program)
+                                    nil buffer nil
+                                    (concat "-output-directory=" dir)
+                                    "-ini"
+                                    (concat "-jobname=" fkey)
+                                    (concat "&" (latex-to-svg-backend--latex-format-name
+                                                 program))
+                                    pre-tex)
+                    (file-missing (signal (car err) (cdr err)))
+                    ;; Found but cannot be started.  Report it once; the
+                    ;; caller falls back to a full compile, which reports
+                    ;; its own failure.
+                    (file-error
+                     (latex-to-svg-backend--warn-once
+                      "dumping the LaTeX preamble" err)))
+                (delete-file pre-tex))))
       (if (and (eql rv 0) (file-exists-p fmt))
           (progn
             (delete-file log)
@@ -473,7 +476,9 @@ the `.fmt' file on every compile.  Bumps the mtime of the `.fmt' file it
 returns (see `latex-to-svg-backend--touch-format').  Returns nil — so
 the caller uses a full compile — when precompilation is off, the dump
 fails, or the `.fmt' file has been blocklisted after an earlier
-failure."
+failure.  When PROGRAM is not found, it returns nil without
+blocklisting, so the compile reports the missing program and the dump
+runs once PROGRAM is installed."
   (when latex-to-svg-backend-precompile
     (let ((fkey (latex-to-svg-backend--format-key preamble program)))
       (unless (gethash fkey latex-to-svg-backend--format-blocklist)
@@ -494,17 +499,19 @@ failure."
            (t
             (delete-file fmt)
             (delete-file (latex-to-svg-backend--format-stamp-file fmt))
-            (if-let* ((built (latex-to-svg-backend--build-format
-                              fkey preamble program)))
-                (progn
-                  (puthash fkey t latex-to-svg-backend--format-checked)
-                  built)
-              ;; The dump failed.  Give up on this preamble for the session:
-              ;; retrying would run a synchronous `latex -ini' for every
-              ;; equation, and a preamble that will not dump does not start
-              ;; dumping on the next attempt.
-              (latex-to-svg-backend--block-format fmt)
-              nil))))))))
+            (condition-case nil
+                (if-let* ((built (latex-to-svg-backend--build-format
+                                  fkey preamble program)))
+                    (progn
+                      (puthash fkey t latex-to-svg-backend--format-checked)
+                      built)
+                  ;; The dump failed.  Give up on this preamble for the
+                  ;; session: retrying would run a synchronous `latex -ini'
+                  ;; for every equation, and a preamble that will not dump
+                  ;; does not start dumping on the next attempt.
+                  (latex-to-svg-backend--block-format fmt)
+                  nil)
+              (file-missing nil)))))))))
 
 (defun latex-to-svg-backend--block-format (format-file)
   "Abandon FORMAT-FILE and skip precompilation for its preamble this session.
@@ -773,7 +780,9 @@ A theme change therefore re-tints from cache without recompiling."
                             (format "[store] storing the SVG failed: %s"
                                     (error-message-string err)))
                            nil)))))
-              (retry-format (and (not stored) format-file)))
+              ;; A program that is not found fails with any preamble.
+              (retry-format (and (not stored) format-file
+                                 (not (stringp (cdr exit))))))
          (unwind-protect
              (cond
               (stored
@@ -792,7 +801,8 @@ A theme change therefore re-tints from cache without recompiling."
                 (latex-to-svg-backend--process-output output-buffer)
                 (plist-get toolchain :engine)
                 (and (eq (car exit) 'latex)
-                     (latex-to-svg-backend--latex-formula-error-p dir)))))
+                     (latex-to-svg-backend--latex-formula-error-p dir))
+                exit)))
            (unless retry-format
              (latex-to-svg-backend--compile-done key))
            (when (buffer-live-p output-buffer)

@@ -63,7 +63,7 @@ Equation numbering used to be the gap: the AUCTeX-based packages compile a whole
   - RaTeX: its `render-svg` program, v0.1.14 or later. No TeX installation. What [Engines](#engines) says about RaTeX was checked with v0.1.14.
   - texres: `texres` 0.7.7 or later, and `pdftocairo` from Poppler. No TeX Live installation. texres 0.7.7 fixed the dump of the `.fmt` file; with an older texres every equation compiles with the full preamble.
 
-  Without them, a placeholder panel boxing the raw LaTeX is shown instead (or set `latex-to-svg-backend-use-placeholder`).
+  When a program of the requested engine is not found, the backend warns once per session, naming the engine and the program, and the request returns `nil`. Nothing is recorded: the next request runs the program again, so an equation compiles once the program is installed.
 
 ## Installation
 
@@ -200,7 +200,7 @@ Helpers a front-end typically needs for its refresh policy:
 | Function | Purpose |
 | --- | --- |
 | `latex-to-svg-backend-available-p` | SVG build support + graphical (or non-graphic opt-in) |
-| `latex-to-svg-backend-tools-available-p` | the programs of an engine on `exec-path`: `latex` + `dvisvgm`, or `render-svg` with the argument `ratex` |
+| `latex-to-svg-backend-tools-available-p` | the programs of an engine on `exec-path`: `latex` + `dvisvgm`, `render-svg` with the argument `ratex`, or `texres` + `pdftocairo` with `texres`. A request does not call it: it runs the programs, and a missing one is warned about |
 | `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change; takes an optional `font-height` so it matches the render |
 | `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font; takes an optional `font-height`, and returns `nil` when no height is known (defer) |
 | `latex-to-svg-backend-foreground-color` | current tint color (`#rrggbb`) |
@@ -210,11 +210,11 @@ Helpers a front-end typically needs for its refresh policy:
 
 ### Failed compiles and the fallback engine
 
-When an engine rejects the formula — RaTeX cannot parse it, or LaTeX stops on an error in the document — the failure is recorded in the equation's `.eld` sidecar as `(:failed t)`, and a later request with the same `:engine` returns `nil` without compiling. A missing program, a crash or a killed process is not the formula's fault, so it is not recorded, and the next request compiles again. The record belongs to the cache key, so anything that changes the key retries on its own; `latex-to-svg-backend-invalidate` deletes the record for the rest (see [Troubleshooting](#troubleshooting)).
+When an engine rejects the formula — RaTeX cannot parse it, or LaTeX stops on an error in the document — the failure is recorded in the equation's `.eld` sidecar as `(:failed t)`, and a later request with the same `:engine` returns `nil` without compiling. A missing program, a crash or a killed process is not the formula's fault, so it is not recorded, and the next request compiles again. A missing program is warned about once per session per engine and program: "The texres engine could not run `pdftocairo': program not found." The record belongs to the cache key, so anything that changes the key retries on its own; `latex-to-svg-backend-invalidate` deletes the record for the rest (see [Troubleshooting](#troubleshooting)).
 
-A failed compile warns once per equation per buffer, naming the buffer and linking to the log. `:quiet t` drops that warning for the call; configuration problems (a missing program, an unwritable cache, a fallback without LaTeX) still warn. The backend has no option for it: a front-end owns the user's choice and passes it, as for `:engine`.
+A failed compile warns once per equation per buffer, naming the buffer and linking to the log. `:quiet t` drops that warning for the call; configuration problems (a missing program, an unwritable cache) still warn. The backend has no option for it: a front-end owns the user's choice and passes it, as for `:engine`.
 
-`:fallback 'latex` typesets a formula `ENGINE` rejected with LaTeX instead, under LaTeX's own cache key, so a later request with the same `:engine` and `:fallback` returns LaTeX's picture from cache. The callbacks queued for the failed compile fire when LaTeX's SVG is ready. The same string must be valid LaTeX: a macro defined only in `latex-to-svg-backend-ratex-macros` fails in both engines. When `latex` or `dvisvgm` is missing, the backend warns once per session. The first fallback picture in a buffer is announced with a message such as `3 equations in notes.md fell back to LaTeX: RaTeX could not parse them`, since those pictures are typeset in LaTeX's style (Computer Modern) and RaTeX's in KaTeX's fonts. `latex-to-svg-backend-engine-used` tells a front-end which engine drew an image, for example for a tooltip.
+`:fallback 'latex` typesets a formula `ENGINE` rejected with LaTeX instead, under LaTeX's own cache key, so a later request with the same `:engine` and `:fallback` returns LaTeX's picture from cache. The callbacks queued for the failed compile fire when LaTeX's SVG is ready. The same string must be valid LaTeX: a macro defined only in `latex-to-svg-backend-ratex-macros` fails in both engines. When `latex` or `dvisvgm` is missing, the backend warns as for any missing program. The first fallback picture in a buffer is announced with a message such as `3 equations in notes.md fell back to LaTeX: RaTeX could not parse them`, since those pictures are typeset in LaTeX's style (Computer Modern) and RaTeX's in KaTeX's fonts. `latex-to-svg-backend-engine-used` tells a front-end which engine drew an image, for example for a tooltip.
 
 ### Compile metadata (`.eld` sidecar)
 

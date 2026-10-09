@@ -389,22 +389,29 @@
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-build-format-reports-unstartable-latex ()
-  ;; A LaTeX binary that vanished after the toolchain check is reported once;
+  ;; A LaTeX program that is found but cannot be started is reported once;
   ;; the dump still yields nil so the caller falls back to a full compile.
+  ;; One that is not found signals `file-missing', for `--ensure-format'
+  ;; (see `latex-to-svg-backend-missing-tex-program-not-blocklisted').
   (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-fmt-err" t))
-        (warnings 0))
+        (warnings 0)
+        (err '(permission-denied "Searching for program" "Permission denied"
+                                 "latex")))
     (unwind-protect
         (cl-letf (((symbol-function 'call-process)
-                   (lambda (&rest _)
-                     (signal 'file-missing
-                             (list "Searching for program" "No such file or directory"
-                                   "latex"))))
+                   (lambda (&rest _) (signal (car err) (cdr err))))
                   ((symbol-function 'display-warning)
                    (lambda (&rest _) (cl-incf warnings))))
           (clrhash latex-to-svg-backend--warned)
           (should-not (latex-to-svg-backend--build-format "deadbeef" (latex-to-svg-backend--preamble)))
           (should-not (latex-to-svg-backend--build-format "deadbeef" (latex-to-svg-backend--preamble)))
-          (should (= 1 warnings)))
+          (should (= 1 warnings))
+          (setq err '(file-missing "Searching for program"
+                                   "No such file or directory" "latex"))
+          (should-error (latex-to-svg-backend--build-format
+                         "deadbeef" (latex-to-svg-backend--preamble))
+                        :type 'file-missing)
+          (should-not (directory-files (latex-to-svg-backend--fmt-dir) nil "\\.tex\\'")))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-color-to-hex-reports-colorless-display ()
@@ -590,15 +597,6 @@
   (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () nil)))
     (should-not (latex-to-svg-backend "E=mc^2"))))
 
-(ert-deftest latex-to-svg-backend-returns-placeholder-without-tools ()
-  ;; Renderable but no toolchain => the placeholder panel image, not nil.
-  (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
-            ((symbol-function 'latex-to-svg-backend-tools-available-p)
-             (lambda (&optional _engine) nil))
-            ((symbol-function 'latex-to-svg-backend--placeholder)
-             (lambda (_latex) 'placeholder-image)))
-    (should (eq (latex-to-svg-backend "E=mc^2") 'placeholder-image))))
-
 (ert-deftest latex-to-svg-backend-schedules-and-coalesces-compiles ()
   ;; Renderable, tools present, SVG not yet on disk: the entry point returns
   ;; nil, schedules ONE compile, and queues every callback for the same
@@ -608,8 +606,6 @@
         (latex-to-svg-backend--running nil)
         (compiles 0))
     (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
-              ((symbol-function 'latex-to-svg-backend-tools-available-p)
-               (lambda (&optional _engine) t))
               ((symbol-function 'latex-to-svg-backend--cached-image) (lambda (&rest _) nil))
               ((symbol-function 'latex-to-svg-backend--compile)
                (lambda (&rest _) (cl-incf compiles))))
@@ -628,8 +624,6 @@
         (compiles 0))
     (unwind-protect
         (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
-                  ((symbol-function 'latex-to-svg-backend-tools-available-p)
-                   (lambda (&optional _engine) t))
                   ((symbol-function 'latex-to-svg-backend--svg-file) (lambda (_k) tmp))
                   ((symbol-function 'latex-to-svg-backend--cached-image) (lambda (&rest _) nil))
                   ((symbol-function 'latex-to-svg-backend--compile)
@@ -695,6 +689,7 @@ completion event."
           (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal))
           (latex-to-svg-backend--warned (make-hash-table :test 'equal))
           (l2s-test-processes nil)
+          (l2s-test-missing nil)
           (l2s-test-warnings nil))
      (unwind-protect
          (with-temp-buffer
@@ -703,6 +698,12 @@ completion event."
                (lambda (&rest plist)
                  (unless (buffer-live-p (plist-get plist :buffer))
                    (error "Process output buffer is not live"))
+                 ;; As `make-process' does for a program not on `exec-path'.
+                 (let ((program (car (plist-get plist :command))))
+                   (when (member program l2s-test-missing)
+                     (signal 'file-missing
+                             (list "Searching for program"
+                                   "No such file or directory" program))))
                  (let ((process
                         (vector 'fake-process 'run 0 plist default-directory)))
                    (push process l2s-test-processes)
@@ -1741,10 +1742,6 @@ Return the SVG path."
          (compiled nil))
     (unwind-protect
         (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
-                  ((symbol-function 'latex-to-svg-backend--latex-tools-available-p)
-                   (lambda () t))
-                  ((symbol-function 'latex-to-svg-backend--ratex-tools-available-p)
-                   (lambda () t))
                   ((symbol-function 'latex-to-svg-backend--compile)
                    (lambda (key &rest _) (push (cons 'latex key) compiled)))
                   ((symbol-function 'latex-to-svg-backend--ratex-compile)
@@ -1950,7 +1947,7 @@ Return the SVG path."
   "What `render-svg' prints for a formula it cannot parse.")
 
 (defmacro latex-to-svg-backend-tests--with-public-api (&rest body)
-  "Run BODY with fake processes, both engines found, and no display needed.
+  "Run BODY with fake processes and no display needed.
 A cached SVG is displayed as the symbol `image'."
   (declare (indent 0) (debug t))
   `(latex-to-svg-backend-tests--with-fake-processes
@@ -1958,10 +1955,6 @@ A cached SVG is displayed as the symbol `image'."
            (latex-to-svg-backend-ratex-macros "")
            (latex-to-svg-backend--image-cache (make-hash-table :test 'equal)))
        (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
-                 ((symbol-function 'latex-to-svg-backend--latex-tools-available-p)
-                  (lambda () t))
-                 ((symbol-function 'latex-to-svg-backend--ratex-tools-available-p)
-                  (lambda () t))
                  ((symbol-function 'latex-to-svg-backend--load-svg-image)
                   (lambda (&rest _) 'image)))
          ,@body))))
@@ -2130,36 +2123,123 @@ NEWEST is a function returning the most recently started fake process."
         (latex-to-svg-backend--note-fallback "k4" 'ratex 'latex)
         (should (= 1 (length timers)))))))
 
-(ert-deftest latex-to-svg-backend-fallback-needs-latex ()
-  ;; The fallback engine's programs are missing: a configuration warning,
-  ;; once per session, even for quiet requests, plus the failure itself
-  ;; unless the request is quiet.  The failure is still recorded, so the
-  ;; next request does not compile.
+(ert-deftest latex-to-svg-backend-missing-program-warns-and-retries ()
+  ;; A program that is not found: the request returns nil, one warning
+  ;; names the engine and the program, even for a quiet request, and
+  ;; nothing is recorded, so the next request runs the program again and
+  ;; compiles once it is installed.
   (latex-to-svg-backend-tests--with-public-api
-    (cl-letf (((symbol-function 'latex-to-svg-backend--latex-tools-available-p)
-               (lambda () nil)))
-      (let ((config (lambda ()
-                      (seq-count (lambda (w) (string-match-p "Falling back to LaTeX needs"
-                                                             (nth 1 w)))
-                                 l2s-test-warnings))))
-        (latex-to-svg-backend "$\\SI{1}{m}$" :engine 'ratex :fallback 'latex
-                              :callback #'ignore)
-        (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
-        (should (= 1 (funcall config)))
-        (should (= 2 (length l2s-test-warnings)))
-        (latex-to-svg-backend "$\\SI{2}{m}$" :engine 'ratex :fallback 'latex
-                              :quiet t :callback #'ignore)
-        (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
-        (should (= 1 (funcall config)))
-        (should (= 2 (length l2s-test-warnings)))
-        ;; From the record, in another buffer: no compile, and the
-        ;; configuration warning is not repeated this session.
-        (with-temp-buffer
-          (should-not (latex-to-svg-backend "$\\SI{1}{m}$" :engine 'ratex
-                                            :fallback 'latex :callback #'ignore))
-          (should (= 2 (length l2s-test-processes)))
-          (should (= 1 (funcall config)))
-          (should (= 3 (length l2s-test-warnings))))))))
+    (setq l2s-test-missing '("ratex-direct"))
+    (let ((missing (lambda ()
+                     (seq-count
+                      (lambda (w)
+                        (string-match-p
+                         "The RaTeX engine could not run `ratex-direct': program not found"
+                         (nth 1 w)))
+                      l2s-test-warnings))))
+      (should-not (latex-to-svg-backend "$x$" :engine 'ratex :quiet t
+                                        :callback #'ignore))
+      (should (= 1 (funcall missing)))
+      (should (= 1 (length l2s-test-warnings)))
+      (should-not (latex-to-svg-backend--failed-p
+                   (latex-to-svg-backend--cache-key "$x$" 'ratex)))
+      (should-not latex-to-svg-backend--running)
+      (should-not (latex-to-svg-backend "$y$" :engine 'ratex :callback #'ignore))
+      (should (= 1 (length l2s-test-warnings)))
+      (setq l2s-test-missing nil)
+      (latex-to-svg-backend "$x$" :engine 'ratex :callback #'ignore)
+      (should (= 1 (length l2s-test-processes))))))
+
+(ert-deftest latex-to-svg-backend-missing-absolute-program ()
+  ;; `make-process' starts an absolute file name that does not exist, and
+  ;; the process exits with 127: that is reported as a missing program.
+  ;; An existing program that exits with 127 is an ordinary failure.
+  (latex-to-svg-backend-tests--with-fake-processes
+    (let ((results nil))
+      (dolist (program (list "/l2s-no-such-dir/latex"
+                             (expand-file-name invocation-name
+                                               invocation-directory)))
+        (let ((buffer (generate-new-buffer " *l2s-127*")))
+          (latex-to-svg-backend--run-process-chain
+           temporary-file-directory buffer
+           (list (list 'latex (list program) "out"))
+           (lambda (_success &optional exit) (push exit results)))
+          (latex-to-svg-backend-tests--finish-fake-process
+           (car l2s-test-processes) 127)))
+      (should (equal (nreverse results)
+                     (list '(latex . "/l2s-no-such-dir/latex")
+                           '(latex . 127)))))))
+
+(ert-deftest latex-to-svg-backend-fallback-program-missing ()
+  ;; The fallback engine's program is not found: the RaTeX failure is
+  ;; recorded and the request handed to LaTeX, whose start fails; the
+  ;; warning names the LaTeX engine and its program.  The next request
+  ;; tries LaTeX again from the record.
+  (latex-to-svg-backend-tests--with-public-api
+    (setq l2s-test-missing '("latex-direct"))
+    (latex-to-svg-backend "$\\SI{1}{m}$" :engine 'ratex :fallback 'latex
+                          :callback #'ignore)
+    (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
+    (should (latex-to-svg-backend--failed-p
+             (latex-to-svg-backend--cache-key "$\\SI{1}{m}$" 'ratex)))
+    (should (= 1 (length l2s-test-warnings)))
+    (should (string-match-p "The LaTeX engine could not run `latex-direct'"
+                            (nth 1 (car l2s-test-warnings))))
+    (setq l2s-test-missing nil)
+    (should-not (latex-to-svg-backend "$\\SI{1}{m}$" :engine 'ratex
+                                      :fallback 'latex :callback #'ignore))
+    (should (= 2 (length l2s-test-processes)))
+    (should (equal (car (plist-get (aref (car l2s-test-processes) 3) :command))
+                   "latex-direct"))))
+
+(ert-deftest latex-to-svg-backend-missing-converter-keeps-format ()
+  ;; `dvisvgm' is not found after `latex' loaded a `.fmt' file: the
+  ;; missing program is reported, and the `.fmt' file is neither blocked
+  ;; nor retried without it, since that would fail the same way.
+  (latex-to-svg-backend-tests--with-public-api
+    (setq l2s-test-missing '("dvisvgm-direct"))
+    (let ((blocked nil))
+      (cl-letf (((symbol-function 'latex-to-svg-backend--ensure-format)
+                 (lambda (&rest _) "/tmp/l2s-fake.fmt"))
+                ((symbol-function 'latex-to-svg-backend--block-format)
+                 (lambda (fmt) (push fmt blocked))))
+        (latex-to-svg-backend "$x$" :callback #'ignore)
+        (let ((latex (car l2s-test-processes)))
+          (with-temp-file (expand-file-name "equation.dvi" (aref latex 4))
+            (insert "fake dvi"))
+          (latex-to-svg-backend-tests--finish-fake-process latex 0))
+        (should-not blocked)
+        (should (= 1 (length l2s-test-processes)))
+        (should-not latex-to-svg-backend--running)
+        (should (string-match-p "could not run `dvisvgm-direct'"
+                                (nth 1 (car l2s-test-warnings))))))))
+
+(ert-deftest latex-to-svg-backend-missing-tex-program-not-blocklisted ()
+  ;; A TeX program that is not found cannot dump the `.fmt' file: no
+  ;; `.fmt' file, no blocklist entry and no warning from the dump, so the
+  ;; dump runs once the program is installed.
+  (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-fmt-missing" t))
+         (latex-to-svg-backend-precompile t)
+         (latex-to-svg-backend-latex-program "l2s-no-such-latex")
+         (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
+         (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal))
+         (latex-to-svg-backend--warned (make-hash-table :test 'equal))
+         (warnings nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (&rest w) (push w warnings))))
+          (should-not (latex-to-svg-backend--ensure-format "\\documentclass{article}"))
+          (should (zerop (hash-table-count latex-to-svg-backend--format-blocklist)))
+          (should-not warnings)
+          (should-not (directory-files (latex-to-svg-backend--fmt-dir) nil "\\.tex\\'")))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
+
+(ert-deftest latex-to-svg-backend-texres-missing-runs-by-name ()
+  ;; Without texres there is no link, and texres is run by its own name,
+  ;; so its start fails as any missing program's does.
+  (let ((latex-to-svg-backend-texres-program "l2s-no-such-texres"))
+    (should (equal (plist-get (latex-to-svg-backend--texres-toolchain) :program)
+                   "l2s-no-such-texres"))))
 
 (ert-deftest latex-to-svg-backend-failure-warns-per-requesting-buffer ()
   ;; Two buffers wait on one compile: each is told, by name.  A killed one

@@ -29,9 +29,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A program that is not found is reported the same way for every engine,
+  the requested one or the fallback: one warning per session per engine and
+  program, "The texres engine could not run `pdftocairo': program not
+  found.", even for a quiet request. The backend no longer looks the
+  programs up before a request: it runs them, and catches the
+  `file-missing` that `make-process` signals. An absolute program file
+  name that does not exist, which `make-process` starts and which exits
+  with 127, is checked then and reported the same way. Nothing is
+  recorded, so the next request runs the program again and an equation
+  compiles once the program is installed. A missing TeX program does not blocklist the
+  preamble's `.fmt` file, and a missing `dvisvgm` or `pdftocairo` does not
+  throw away a `.fmt` file that loaded.
+
 - A compile that cannot start (its scratch directory cannot be created,
   say) is reported once per session instead of signaling to the caller,
   since it may now start from the sentinel of another compile.
+
+### Removed
+
+- The placeholder panel for an engine whose programs are not found: the
+  request returns `nil`, and the warning above says what is missing.
+  `latex-to-svg-backend-use-placeholder` still draws the panel. The
+  separate warning for a fallback engine without its programs is gone too.
 
 ## [0.11.1] - 2026-09-27
 

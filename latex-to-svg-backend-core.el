@@ -98,10 +98,7 @@ buffer font across themes, faces, and text scale."
   :group 'latex-to-svg-backend)
 
 (defcustom latex-to-svg-backend-use-placeholder nil
-  "When non-nil, draw the placeholder panel instead of typesetting LaTeX.
-Also used as the automatic fallback when the programs of the engine a
-call asks for are unavailable (see
-`latex-to-svg-backend-tools-available-p')."
+  "When non-nil, draw the placeholder panel instead of typesetting LaTeX."
   :type 'boolean
   :safe #'booleanp
   :group 'latex-to-svg-backend)
@@ -800,10 +797,10 @@ width='%.4fpt' height='%.4fpt' viewBox='%.4f %.4f %.4f %.4f'>"
   "Return a placeholder SVG image boxing the raw LATEX, or nil.
 
 This does NOT typeset LATEX — it draws the source inside a bordered
-panel.  Used when `latex-to-svg-backend-use-placeholder' is set or the
-toolchain is unavailable, so math still has a visible (if un-typeset)
-rendering.  Returns nil when equations aren't renderable (see
-`latex-to-svg-backend-available-p'), so callers fall back to the raw text.
+panel.  Used when `latex-to-svg-backend-use-placeholder' is set, so
+math still has a visible (if un-typeset) rendering.  Returns nil when
+equations aren't renderable (see `latex-to-svg-backend-available-p'),
+so callers fall back to the raw text.
 
 LATEX is the equation source with the surrounding delimiters
 already stripped, e.g. \"E=mc^2\"."
@@ -899,7 +896,13 @@ and OUTPUT-FILE exists.  DONE is called once with non-nil on complete
 success and nil on any failed exit, signal, missing output, or process
 startup error.  On a failed exit DONE gets a second argument, the cons
 \(STAGE . EXIT-STATUS): the program ran and reported the failure itself,
-which an engine reads to tell a formula it rejects from a crash."
+which an engine reads to tell a formula it rejects from a crash.  When
+the program of STAGE is not found, the second argument is
+\(STAGE . PROGRAM), PROGRAM the string that names it (see
+`latex-to-svg-backend--compile-failed').  `make-process' signals
+`file-missing' for a name it does not find on the variable `exec-path',
+but starts an absolute file name that does not exist, which exits with
+status 127; only then is the file checked."
   (cl-labels
       ((run
         (remaining)
@@ -935,9 +938,24 @@ which an engine reads to tell a formula it rejects from a crash."
                                 output-exists)
                            (run (cdr remaining)))
                           ((and (eq status 'exit)
+                                (= exit-status 127)
+                                (file-name-absolute-p (car command))
+                                (not (file-executable-p (car command))))
+                           (latex-to-svg-backend--append-process-log
+                            output-buffer
+                            (format "[%s] program not found: %s"
+                                    stage (car command)))
+                           (funcall done nil (cons stage (car command))))
+                          ((and (eq status 'exit)
                                 (not (zerop exit-status)))
                            (funcall done nil (cons stage exit-status)))
                           (t (funcall done nil))))))))
+              (file-missing
+               (latex-to-svg-backend--append-process-log
+                output-buffer
+                (format "[%s] failed to start: %s"
+                        stage (error-message-string err)))
+               (funcall done nil (cons stage (car command))))
               (error
                (latex-to-svg-backend--append-process-log
                 output-buffer
@@ -1042,6 +1060,24 @@ warning links to KEY's saved log when there is one."
                                     'action (lambda (_) (find-file log))
                                     'help-echo "Open the compile log"))))))))))
 
+(defun latex-to-svg-backend--report-missing-program (engine program)
+  "Warn that ENGINE could not run PROGRAM, because it is not found.
+A missing program is a configuration problem, not the formula's, so
+the warning is given even for a quiet request, once per session per
+ENGINE and PROGRAM (see `latex-to-svg-backend--mark-once').  Only the
+warning is once: nothing is recorded, so every request runs PROGRAM
+again, and an equation compiles as soon as PROGRAM is installed."
+  (let ((engine (or engine 'latex)))
+    (when (latex-to-svg-backend--mark-once
+           (format "program not found/%s/%s" engine program))
+      (display-warning
+       'latex-to-svg-backend
+       (format "The %s engine could not run `%s': program not found.
+Install it, or set where it is with \
+M-x customize-group RET latex-to-svg-backend-%s."
+               (latex-to-svg-backend--engine-name engine) program engine)
+       :warning))))
+
 (defun latex-to-svg-backend--record-failure (key)
   "Record in KEY's `.eld' sidecar that the formula failed to compile.
 The record is `(:failed t)'.  A request that finds it does not compile
@@ -1056,7 +1092,7 @@ equation is simply compiled again next time."
      (latex-to-svg-backend--warn-once "recording a failed compile" err))))
 
 (defun latex-to-svg-backend--compile-failed
-    (key latex dir &optional process-output engine formula-fault)
+    (key latex dir &optional process-output engine formula-fault exit)
   "Handle a failed compile of LATEX by ENGINE for KEY.
 DIR is the scratch directory containing equation.log when LaTeX
 created one.  PROCESS-OUTPUT is the captured stdout and stderr from
@@ -1069,6 +1105,12 @@ compiling it again would fail again: the failure is recorded (see
 fallback (see `latex-to-svg-backend--waiter') is handed to it.  A
 missing program, a crash or a killed process is not the formula's
 fault, so it is not recorded and the next request compiles again.
+
+EXIT is the second argument the engine's DONE received from
+`latex-to-svg-backend--run-process-chain'.  When it says a program was
+not found, that is reported (see
+`latex-to-svg-backend--report-missing-program') instead of the failure
+of LATEX, and no waiter is handed to its fallback.
 
 Every other waiter that is not quiet gets a warning in its requesting
 buffer, linking to the log (see `latex-to-svg-backend--report-failure').
@@ -1097,26 +1139,28 @@ echoing an unencodable Unicode character would otherwise make
             (when have-tex-log
               (insert "\n--- process output ---\n"))
             (insert process-output)))))
-    (when formula-fault
-      (latex-to-svg-backend--record-failure key))
-    (dolist (waiter (gethash key latex-to-svg-backend--pending))
-      (let ((fallback (plist-get waiter :fallback))
-            (buffer (plist-get waiter :buffer)))
-        (cond
-         ((and formula-fault fallback)
-          ;; The fallback's own waiter has none, so a failure there is
-          ;; reported instead of falling back again.
-          (condition-case fb-err
-              (funcall fallback (plist-put (copy-sequence waiter) :fallback nil))
-            (error
-             (message "latex-to-svg-backend: fallback error: %S" fb-err))))
-         ((plist-get waiter :quiet))
-         ((buffer-live-p buffer)
-          (latex-to-svg-backend--report-failure key latex engine buffer)
-          (setq reported t))
-         (t (setq orphaned t)))))
-    (when (and orphaned (not reported))
-      (latex-to-svg-backend--report-failure key latex engine))))
+    (if (stringp (cdr exit))
+        (latex-to-svg-backend--report-missing-program engine (cdr exit))
+      (when formula-fault
+        (latex-to-svg-backend--record-failure key))
+      (dolist (waiter (gethash key latex-to-svg-backend--pending))
+        (let ((fallback (plist-get waiter :fallback))
+              (buffer (plist-get waiter :buffer)))
+          (cond
+           ((and formula-fault fallback)
+            ;; The fallback's own waiter has none, so a failure there is
+            ;; reported instead of falling back again.
+            (condition-case fb-err
+                (funcall fallback (plist-put (copy-sequence waiter) :fallback nil))
+              (error
+               (message "latex-to-svg-backend: fallback error: %S" fb-err))))
+           ((plist-get waiter :quiet))
+           ((buffer-live-p buffer)
+            (latex-to-svg-backend--report-failure key latex engine buffer)
+            (setq reported t))
+           (t (setq orphaned t)))))
+      (when (and orphaned (not reported))
+        (latex-to-svg-backend--report-failure key latex engine)))))
 
 ;;;; Cache maintenance (garbage collection)
 
