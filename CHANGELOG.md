@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-09
+
 ### Added
 
 - A third engine, `texres`: `:engine 'texres` compiles with the `pdflatex`
@@ -18,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `latex-to-svg-backend-texres-program` and
   `latex-to-svg-backend-pdftocairo-program`. texres runs one `pdflatex`
   pass only when called by that name, so the backend links it as
-  `pdflatex` in the `texres/` subdirectory of the cache.
+  `pdflatex` in the `texres/` subdirectory of the cache. Not tested on
+  Windows, where creating a symbolic link needs administrator rights or
+  Developer Mode.
 
 - `latex-to-svg-backend-jobs` is the maximum number of compiles to run at
   once, by default the number of processors (`num-processors`). Further
@@ -479,7 +483,8 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
-[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.9.0...v0.10.0
