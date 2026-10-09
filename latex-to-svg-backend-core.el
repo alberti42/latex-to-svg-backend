@@ -656,18 +656,27 @@ should defer to display time rather than size against a guess."
                       tag)
     (match-string 1 tag)))
 
-(defun latex-to-svg-backend--ink-box (svg)
-  "Return the box around the ink of SVG, as (X0 Y0 X1 Y1), or nil.
-dvisvgm's `--exact-bbox' crops the LaTeX engine's SVGs to their ink;
-this is the same box for an engine whose SVG is sized otherwise.
+(defun latex-to-svg-backend--transform-point (matrix x y)
+  "Return the point X Y mapped through MATRIX, as (X Y).
+MATRIX is (A B C D E F), the arguments of an SVG `matrix()' transform,
+or nil for none."
+  (if matrix
+      (pcase-let ((`(,a ,b ,c ,d ,e ,f) matrix))
+        (list (+ (* a x) (* c y) e) (+ (* b x) (* d y) f)))
+    (list x y)))
 
-The ink is drawn with `<path>' elements, whose coordinates are all
-absolute pairs, and with `<rect>' and `<line>'.  A path's box is taken
-over its control points, which bound the curve.  A stroked element's
-box grows by half its `stroke-width'.  Nil when SVG has none of these
-elements."
+(defun latex-to-svg-backend--elements-box (svg &optional glyphs)
+  "Return the box around the elements drawn in SVG, as (X0 Y0 X1 Y1), or nil.
+SVG is markup without `<defs>'.  GLYPHS is an alist of (ID . BOX) for
+the `<use>' elements to place (see `latex-to-svg-backend--ink-box').
+
+A path's box is taken over its control points, which bound the curve;
+its coordinates must be absolute pairs (M, L, Q, C and Z commands).  A
+`transform' attribute must be a `matrix()'.  A stroked element's box
+grows by half its `stroke-width', scaled by the transform."
   (let ((start 0) box)
-    (while (string-match "<\\(path\\|rect\\|line\\)[[:space:]][^>]*>" svg start)
+    (while (string-match "<\\(path\\|rect\\|line\\|use\\)[[:space:]][^>]*>"
+                         svg start)
       (let ((tag (match-string 0 svg))
             (kind (match-string 1 svg)))
         (setq start (match-end 0))
@@ -675,9 +684,18 @@ elements."
                        (latex-to-svg-backend--svg-attribute tag name)))
                (num (lambda (name)
                       (string-to-number (or (funcall attr name) "0"))))
+               (matrix
+                (when-let* ((transform (funcall attr "transform"))
+                            ((string-match "\\`matrix(\\([^)]*\\))\\'" transform)))
+                  (mapcar #'string-to-number
+                          (split-string (match-string 1 transform) "[ ,]+" t))))
                (stroke (funcall attr "stroke"))
                (grow (if (and stroke (not (equal stroke "none")))
-                         (/ (funcall num "stroke-width") 2.0)
+                         (* (/ (funcall num "stroke-width") 2.0)
+                            (if matrix
+                                (pcase-let ((`(,a ,b ,c ,d) matrix))
+                                  (sqrt (abs (- (* a d) (* b c)))))
+                              1))
                        0))
                (points
                 (pcase kind
@@ -694,16 +712,54 @@ elements."
                                  (+ y (funcall num "height"))))))
                   ("line"
                    (list (list (funcall num "x1") (funcall num "y1"))
-                         (list (funcall num "x2") (funcall num "y2")))))))
-          (pcase-dolist (`(,x ,y) points)
-            (when y
-              (setq box
-                    (if box
-                        (pcase-let ((`(,x0 ,y0 ,x1 ,y1) box))
-                          (list (min x0 (- x grow)) (min y0 (- y grow))
-                                (max x1 (+ x grow)) (max y1 (+ y grow))))
-                      (list (- x grow) (- y grow) (+ x grow) (+ y grow)))))))))
+                         (list (funcall num "x2") (funcall num "y2"))))
+                  ("use"
+                   (when-let* ((href (or (funcall attr "xlink:href")
+                                         (funcall attr "href")))
+                               (glyph (cdr (assoc (string-remove-prefix "#" href)
+                                                  glyphs))))
+                     (pcase-let ((`(,x0 ,y0 ,x1 ,y1) glyph)
+                                 (x (funcall num "x"))
+                                 (y (funcall num "y")))
+                       ;; All four corners, so a transform maps the box.
+                       (list (list (+ x x0) (+ y y0)) (list (+ x x1) (+ y y0))
+                             (list (+ x x0) (+ y y1)) (list (+ x x1) (+ y y1)))))))))
+          (pcase-dolist (`(,px ,py) points)
+            (when py
+              (pcase-let ((`(,x ,y) (latex-to-svg-backend--transform-point
+                                     matrix px py)))
+                (setq box
+                      (if box
+                          (pcase-let ((`(,x0 ,y0 ,x1 ,y1) box))
+                            (list (min x0 (- x grow)) (min y0 (- y grow))
+                                  (max x1 (+ x grow)) (max y1 (+ y grow))))
+                        (list (- x grow) (- y grow) (+ x grow) (+ y grow))))))))))
     box))
+
+(defun latex-to-svg-backend--ink-box (svg)
+  "Return the box around the ink of SVG, as (X0 Y0 X1 Y1), or nil.
+dvisvgm's `--exact-bbox' crops the LaTeX engine's SVGs to their ink;
+this is the same box for an engine whose SVG is sized otherwise.
+
+The ink is drawn with `<path>', `<rect>' and `<line>' elements (see
+`latex-to-svg-backend--elements-box'), and with `<use>' elements that
+place a group of `<defs>', as pdftocairo draws each glyph: such a group
+counts only where a `<use>' places it.  Nil when SVG has no ink."
+  (let ((glyphs nil)
+        (body svg))
+    (when (string-match "<defs>\\(\\(?:.\\|\n\\)*?\\)</defs>" svg)
+      (let ((defs (match-string 1 svg))
+            (start 0))
+        (setq body (replace-match "" t t svg))
+        (while (string-match
+                "<g id=\"\\([^\"]+\\)\"[^>]*>\\(\\(?:.\\|\n\\)*?\\)</g>"
+                defs start)
+          (setq start (match-end 0))
+          (let ((id (match-string 1 defs)))
+            (when-let* ((box (latex-to-svg-backend--elements-box
+                              (match-string 2 defs))))
+              (push (cons id box) glyphs))))))
+    (latex-to-svg-backend--elements-box body glyphs)))
 
 (defun latex-to-svg-backend--crop-to-ink (svg ink)
   "Return SVG made color-independent and cropped to its ink, or nil.
@@ -727,8 +783,12 @@ pt, as in the LaTeX engine's SVGs.  Nil when SVG has no root element."
                       (list x y (+ x w) (+ y h))))))
       (pcase-let ((`(,x0 ,y0 ,x1 ,y1) box))
         (concat (substring svg 0 root-beg)
-                (format "<svg xmlns='http://www.w3.org/2000/svg' \
+                (format "<svg xmlns='http://www.w3.org/2000/svg'%s \
 width='%.4fpt' height='%.4fpt' viewBox='%.4f %.4f %.4f %.4f'>"
+                        ;; `<use xlink:href=...>', as pdftocairo writes it.
+                        (if (string-search "xlink:" svg)
+                            " xmlns:xlink='http://www.w3.org/1999/xlink'"
+                          "")
                         (- x1 x0) (- y1 y0) x0 y0 (- x1 x0) (- y1 y0))
                 (string-replace ink "currentColor" (substring svg root-end)))))))
 

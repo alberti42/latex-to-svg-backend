@@ -1833,6 +1833,35 @@ Return the SVG path."
             "<svg viewBox=\"0 0 3 2\" width=\"3pt\" height=\"2pt\"></svg>")))
   (should-not (latex-to-svg-backend--ratex-svg "not an svg")))
 
+(ert-deftest latex-to-svg-backend-ink-box-places-glyphs-and-transforms ()
+  ;; pdftocairo's shape: a glyph is drawn once in <defs> and counts only
+  ;; where a <use> places it; a rule is a stroked path with a matrix().
+  (let ((svg (concat
+              "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+              "xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
+              "width=\"20pt\" height=\"20pt\" viewBox=\"0 0 20 20\">\n"
+              "<defs>\n<g>\n<g id=\"glyph-0-0\">\n"
+              "<path d=\"M 0 -4 L 3 -4 L 3 1 Z \"/>\n</g>\n</g>\n</defs>\n"
+              "<g fill=\"rgb(0%, 0%, 0%)\" fill-opacity=\"1\">\n"
+              "<use xlink:href=\"#glyph-0-0\" x=\"5\" y=\"10\"/>\n</g>\n"
+              "<path fill=\"none\" stroke-width=\"0.4\" "
+              "stroke=\"rgb(0%, 0%, 0%)\" d=\"M 0 0 L 4 0 \" "
+              "transform=\"matrix(2, 0, 0, -2, 4, 14)\"/>\n</svg>\n")))
+    ;; Glyph: x 5..8, y 6..11.  Rule: x 4..12 at y 14, grown by 0.4.
+    (should (equal (mapcar (lambda (v) (/ (round (* v 1000)) 1000.0))
+                           (latex-to-svg-backend--ink-box svg))
+                   '(3.6 6.0 12.4 14.4)))
+    (let ((out (latex-to-svg-backend--crop-to-ink svg "rgb(0%, 0%, 0%)")))
+      ;; `<use xlink:href>' needs the namespace on the rewritten root.
+      (should (string-prefix-p
+               (concat "<svg xmlns='http://www.w3.org/2000/svg' "
+                       "xmlns:xlink='http://www.w3.org/1999/xlink' "
+                       "width='8.8000pt' height='8.4000pt' "
+                       "viewBox='3.6000 6.0000 8.8000 8.4000'>")
+               out))
+      (should-not (string-search "rgb(0%, 0%, 0%)" out))
+      (should (string-search "fill=\"currentColor\"" out)))))
+
 (ert-deftest latex-to-svg-backend-ratex-compile-argv-and-store ()
   ;; `render-svg' is started directly with the formula file; its output is
   ;; stored cropped and recolored, the callbacks run, no `.eld' is written,
