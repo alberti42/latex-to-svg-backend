@@ -763,13 +763,14 @@ counts only where a `<use>' places it.  Nil when SVG has no ink."
 
 (defun latex-to-svg-backend--crop-to-ink (svg ink)
   "Return SVG made color-independent and cropped to its ink, or nil.
-INK is how SVG writes the color its engine drew the default ink in; it
-becomes `currentColor', as dvisvgm's `--currentcolor' does for the
-LaTeX engine.  The root element is rewritten with the viewport around
-the ink (see `latex-to-svg-backend--ink-box') and in the form dvisvgm
-writes it -- width and height in pt, values in single quotes -- which
-is the form `latex-to-svg-backend--pad-svg' reads.  One SVG unit is one
-pt, as in the LaTeX engine's SVGs.  Nil when SVG has no root element."
+INK is a regexp matching how SVG writes the color its engine drew the
+default ink in; it becomes `currentColor', as dvisvgm's `--currentcolor'
+does for the LaTeX engine.  The root element is rewritten with the
+viewport around the ink (see `latex-to-svg-backend--ink-box') and in
+the form dvisvgm writes it -- width and height in pt, values in single
+quotes -- which is the form `latex-to-svg-backend--pad-svg' reads.  One
+SVG unit is one pt, as in the LaTeX engine's SVGs.  Nil when SVG has
+no root element."
   (when (string-match "<svg\\b[^>]*>" svg)
     (let* ((root-beg (match-beginning 0))
            (root-end (match-end 0))
@@ -790,7 +791,8 @@ width='%.4fpt' height='%.4fpt' viewBox='%.4f %.4f %.4f %.4f'>"
                             " xmlns:xlink='http://www.w3.org/1999/xlink'"
                           "")
                         (- x1 x0) (- y1 y0) x0 y0 (- x1 x0) (- y1 y0))
-                (string-replace ink "currentColor" (substring svg root-end)))))))
+                (replace-regexp-in-string
+                 ink "currentColor" (substring svg root-end) t t))))))
 
 ;;;; Placeholder
 
@@ -983,10 +985,11 @@ often runs from the sentinel of the compile that freed the slot."
 ;;;; Compile outcome
 
 (defun latex-to-svg-backend--engine-name (engine)
-  "Return the name of ENGINE (`latex', nil, or `ratex') for a message."
+  "Return the name of ENGINE (`latex', nil, `ratex' or `texres') for a message."
   (pcase-exhaustive engine
     ((or 'nil 'latex) "LaTeX")
-    ('ratex "RaTeX")))
+    ('ratex "RaTeX")
+    ('texres "texres")))
 
 (defun latex-to-svg-backend--notify-pending (key)
   "Call every callback queued for KEY (see `latex-to-svg-backend--enqueue').

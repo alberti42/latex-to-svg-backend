@@ -9,8 +9,8 @@
 
 ;;; Commentary:
 ;;
-;; Compiles the same equations with the LaTeX and the RaTeX engine and
-;; reports how long they take.  Each run uses a fresh temporary cache
+;; Compiles the same equations with the LaTeX, RaTeX and texres engines
+;; and reports how long they take.  Each run uses a fresh temporary cache
 ;; directory, so every equation really compiles; the user's cache is not
 ;; touched.  Run it from a checkout:
 ;;
@@ -18,8 +18,8 @@
 ;;         -f latex-to-svg-backend-benchmark-batch
 ;;
 ;; or, in a running Emacs with the package loaded, load this file and
-;; call `M-x latex-to-svg-backend-benchmark'.  The LaTeX runs use the
-;; current preamble and `latex-to-svg-backend-precompile'; the `.fmt' is
+;; call `M-x latex-to-svg-backend-benchmark'.  The LaTeX and texres runs
+;; use the current preamble and `latex-to-svg-backend-precompile'; the `.fmt' is
 ;; built before the timing starts and its build time is reported
 ;; separately.
 
@@ -79,9 +79,11 @@ temporary cache directory."
          fmt-time times (done 0) wall)
     (unwind-protect
         (progn
-          (when (eq engine 'latex)
+          (when (memq engine '(latex texres))
             (let ((start (float-time)))
-              (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))
+              (latex-to-svg-backend--ensure-format
+               (latex-to-svg-backend--preamble)
+               (and (eq engine 'texres) (latex-to-svg-backend--texres-link)))
               (setq fmt-time (- (float-time) start))))
           (pcase mode
             ('sequential
@@ -121,7 +123,7 @@ temporary cache directory."
   (let* ((ms #'latex-to-svg-backend-benchmark--ms)
          (sorted (sort (copy-sequence (plist-get run :times)) #'<))
          (n (length sorted)))
-    (format "%-5s %-10s ok %2d/%2d  %s%s"
+    (format "%-6s %-10s ok %2d/%2d  %s%s"
             (plist-get run :engine) (plist-get run :mode)
             (plist-get run :done) (plist-get run :total)
             (cond
@@ -144,11 +146,11 @@ temporary cache directory."
 An engine whose programs are not found is left out, with a line saying
 so.  Return the report as a string."
   (let* ((engines (seq-filter #'latex-to-svg-backend-tools-available-p
-                              '(latex ratex)))
+                              '(latex ratex texres)))
          (lines (mapcar (lambda (engine)
-                          (format "%-5s skipped: its programs are not found"
+                          (format "%-6s skipped: its programs are not found"
                                   engine))
-                        (seq-difference '(latex ratex) engines))))
+                        (seq-difference '(latex ratex texres) engines))))
     (dotimes (_ (or rounds 2))
       (dolist (mode '(sequential batch))
         (dolist (engine engines)
@@ -164,7 +166,7 @@ so.  Return the report as a string."
 
 ;;;###autoload
 (defun latex-to-svg-backend-benchmark (&optional rounds)
-  "Time the LaTeX and RaTeX engines and show the report.
+  "Time the LaTeX, RaTeX and texres engines and show the report.
 ROUNDS (default 2, or the prefix argument) is how many times each
 engine runs in each mode.  Emacs is busy until it finishes."
   (interactive "P")

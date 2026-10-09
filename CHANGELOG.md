@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A third engine, `texres`: `:engine 'texres` compiles with the `pdflatex`
+  of [texres](https://github.com/leoliu0/texres), a TeX distribution in a
+  single executable, and converts the PDF with Poppler's `pdftocairo -svg
+  -noshrink`. It reads the LaTeX engine's preamble options, dumps its own
+  `.fmt` file and writes compile metadata. The SVG is cropped to its ink
+  and its marker ink turned into `currentColor`, as for RaTeX. New options
+  `latex-to-svg-backend-texres-program` and
+  `latex-to-svg-backend-pdftocairo-program`. texres runs one `pdflatex`
+  pass only when called by that name, so the backend links it as
+  `pdflatex` in the `texres/` subdirectory of the cache.
+
 - `latex-to-svg-backend-jobs` is the maximum number of compiles to run at
   once, by default the number of processors (`num-processors`). Further
   compiles wait in a queue and start, oldest first, as running ones end.

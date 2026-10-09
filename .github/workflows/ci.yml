@@ -48,7 +48,7 @@ jobs:
           emacs -Q -batch -L . --eval '(setq byte-compile-error-on-warn t)' \
             -f batch-byte-compile latex-to-svg-backend-core.el \
             latex-to-svg-backend-latex.el latex-to-svg-backend-ratex.el \
-            latex-to-svg-backend.el
+            latex-to-svg-backend-texres.el latex-to-svg-backend.el
 
       # Docstring conventions, exiting non-zero on any finding: `checkdoc-file'
       # only prints.  Both flags are set rather than left at their defaults,
@@ -66,6 +66,7 @@ jobs:
             (dolist (file (quote ("latex-to-svg-backend-core.el"
                                   "latex-to-svg-backend-latex.el"
                                   "latex-to-svg-backend-ratex.el"
+                                  "latex-to-svg-backend-texres.el"
                                   "latex-to-svg-backend.el")))
               (checkdoc-file file))
             (if (get-buffer "*Warnings*")

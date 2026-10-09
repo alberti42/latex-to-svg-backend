@@ -1661,7 +1661,9 @@ Return the SVG path."
                latex-to-svg-backend-preamble-not-precompiled
                latex-to-svg-backend-cache-directory
                latex-to-svg-backend-ratex-program
-               latex-to-svg-backend-ratex-macros))
+               latex-to-svg-backend-ratex-macros
+               latex-to-svg-backend-texres-program
+               latex-to-svg-backend-pdftocairo-program))
     (should (get v 'custom-type))
     (should-not (get v 'safe-local-variable))))
 
@@ -1851,7 +1853,8 @@ Return the SVG path."
     (should (equal (mapcar (lambda (v) (/ (round (* v 1000)) 1000.0))
                            (latex-to-svg-backend--ink-box svg))
                    '(3.6 6.0 12.4 14.4)))
-    (let ((out (latex-to-svg-backend--crop-to-ink svg "rgb(0%, 0%, 0%)")))
+    (let ((out (latex-to-svg-backend--crop-to-ink
+                svg (regexp-quote "rgb(0%, 0%, 0%)"))))
       ;; `<use xlink:href>' needs the namespace on the rewritten root.
       (should (string-prefix-p
                (concat "<svg xmlns='http://www.w3.org/2000/svg' "
@@ -2246,6 +2249,128 @@ NEWEST is a function returning the most recently started fake process."
          (when (stringp doc)
            (should-not (string-match-p "M-x\\|Uses keymap"
                                        (substitute-command-keys doc)))))))))
+
+(defconst latex-to-svg-backend-tests--cairo-output
+  (concat
+   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+   "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+   "xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
+   "width=\"14pt\" height=\"12pt\" viewBox=\"0 0 14 12\">\n"
+   "<defs>\n<g>\n<g id=\"glyph-0-0\">\n"
+   "<path d=\"M 0 -4 L 3 -4 L 3 1 Z \"/>\n</g>\n</g>\n</defs>\n"
+   "<g fill=\"rgb(0.390625%, 0.782776%, 1.174927%)\" fill-opacity=\"1\">\n"
+   "<use xlink:href=\"#glyph-0-0\" x=\"5\" y=\"6\"/>\n</g>\n"
+   "<g fill=\"rgb(0%, 0%, 0%)\" fill-opacity=\"1\">\n"
+   "<use xlink:href=\"#glyph-0-0\" x=\"8\" y=\"6\"/>\n</g>\n</svg>\n")
+  "What `pdftocairo -svg' writes, in short: a glyph in the marker ink
+and one in a formula's own black.")
+
+(ert-deftest latex-to-svg-backend-texres-cache-key-is-its-own ()
+  ;; The texres engine reads the LaTeX engine's preamble, but its SVGs are
+  ;; cached apart from LaTeX's and RaTeX's.
+  (let ((doc "$x^2$"))
+    (should-not (equal (latex-to-svg-backend--cache-key doc 'texres)
+                       (latex-to-svg-backend--cache-key doc 'latex)))
+    (should-not (equal (latex-to-svg-backend--cache-key doc 'texres)
+                       (latex-to-svg-backend--cache-key doc 'ratex)))
+    (let ((base (latex-to-svg-backend--cache-key doc 'texres))
+          (latex-to-svg-backend-appended-preamble "\\usepackage{braket}"))
+      (should-not (equal base (latex-to-svg-backend--cache-key doc 'texres))))
+    (should (eq (latex-to-svg-backend--engine 'texres) 'texres))))
+
+(ert-deftest latex-to-svg-backend-texres-compile-argv-and-store ()
+  ;; texres runs as `pdflatex' with the marker ink before the equation;
+  ;; `pdftocairo -svg -noshrink' converts the PDF; the SVG is stored
+  ;; cropped, with the marker as `currentColor' and the formula's own
+  ;; black kept.
+  (latex-to-svg-backend-tests--with-fake-processes
+    (let* ((latex-to-svg-backend-pdftocairo-program "pdftocairo-direct")
+           (link (expand-file-name "texres/pdflatex" l2s-test-cache-dir))
+           (doc "$x^2$")
+           (key (latex-to-svg-backend--cache-key doc 'texres))
+           (callbacks 0))
+      (cl-letf (((symbol-function 'latex-to-svg-backend--texres-link)
+                 (lambda () link)))
+        (latex-to-svg-backend--enqueue
+         key doc (latex-to-svg-backend--waiter (lambda () (cl-incf callbacks)))
+         nil 'texres)
+        (let* ((tex-process (car l2s-test-processes))
+               (scratch (aref tex-process 4))
+               (tex (expand-file-name "equation.tex" scratch))
+               (pdf (expand-file-name "equation.pdf" scratch))
+               (cairo (expand-file-name "cairo.svg" scratch)))
+          (should (equal (plist-get (aref tex-process 3) :command)
+                         (list link "-interaction=nonstopmode"
+                               "-halt-on-error" tex)))
+          (should (string-search
+                   (concat "\\begin{document}\n"
+                           latex-to-svg-backend--texres-ink
+                           doc "\n")
+                   (latex-to-svg-backend-tests--tex-source tex)))
+          (with-temp-file pdf (insert "fake pdf"))
+          (latex-to-svg-backend-tests--finish-fake-process tex-process 0)
+          (let ((cairo-process (car l2s-test-processes)))
+            (should (equal (plist-get (aref cairo-process 3) :command)
+                           (list "pdftocairo-direct" "-svg" "-noshrink"
+                                 pdf cairo)))
+            (with-temp-file cairo
+              (insert latex-to-svg-backend-tests--cairo-output))
+            (latex-to-svg-backend-tests--finish-fake-process cairo-process 0))
+          (should (= callbacks 1))
+          (should-not (gethash key latex-to-svg-backend--pending))
+          (with-temp-buffer
+            (insert-file-contents (latex-to-svg-backend--svg-file key))
+            (should (search-forward
+                     "width='6.0000pt' height='5.0000pt' viewBox='5.0000 2.0000"
+                     nil t))
+            (should (search-forward "fill=\"currentColor\"" nil t))
+            (should (search-forward "fill=\"rgb(0%, 0%, 0%)\"" nil t))))))))
+
+(ert-deftest latex-to-svg-backend-texres-store-recolors-black-without-marker ()
+  ;; Without `xcolor' there is no marker, and no `\color' in a formula
+  ;; either: black is the default ink and becomes `currentColor'.
+  (let ((dir (make-temp-file "l2s-texres-store" t))
+        (svg (make-temp-file "l2s-texres-store" nil ".svg")))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "cairo.svg" dir)
+            (insert (replace-regexp-in-string
+                     latex-to-svg-backend--texres-ink-svg "rgb(0%, 0%, 0%)"
+                     latex-to-svg-backend-tests--cairo-output t t)))
+          (should (latex-to-svg-backend--texres-store dir svg))
+          (with-temp-buffer
+            (insert-file-contents svg)
+            (should-not (search-forward "rgb(0%" nil t))))
+      (delete-directory dir t)
+      (delete-file svg))))
+
+(ert-deftest latex-to-svg-backend-texres-compile-end-to-end ()
+  ;; End to end (needs texres and `pdftocairo'): inline, display and a
+  ;; numbered environment render, cropped and color-independent.
+  (skip-unless (latex-to-svg-backend-tools-available-p 'texres))
+  (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-texres-e2e" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t)))
+          (dolist (doc '("$x^2$"
+                         "\\[\\int_0^1 f\\,dx\\]"
+                         "\\begin{align}\na&=b \\\\\nc&=d\n\\end{align}"))
+            (let ((done 'pending))
+              (latex-to-svg-backend doc :engine 'texres
+                                    :callback (lambda () (setq done t)))
+              (dotimes (_ 100)
+                (when (eq done 'pending)
+                  (accept-process-output nil 0.1)))
+              (should (eq done t))
+              (with-temp-buffer
+                (insert-file-contents
+                 (latex-to-svg-backend--svg-file
+                  (latex-to-svg-backend--cache-key doc 'texres)))
+                (should (search-forward "<svg xmlns='http://www.w3.org/2000/svg'" nil t))
+                (should (search-forward "currentColor" nil t))
+                (goto-char (point-min))
+                (should-not (re-search-forward
+                             latex-to-svg-backend--texres-ink-svg nil t))))))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-ratex-compile-end-to-end ()
   ;; End to end (needs RaTeX's `render-svg'): inline, display and a numbered

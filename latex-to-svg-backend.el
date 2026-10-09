@@ -45,6 +45,11 @@
 ;;     size-independent SVG; the `.fmt' precompilation and compile metadata
 ;;     below are the LaTeX engine's.
 ;;
+;;   * A third engine, `:engine texres', runs LaTeX through texres, a TeX
+;;     distribution in a single executable, and converts its PDF with
+;;     `pdftocairo'.  It reads the LaTeX engine's preamble and has its own
+;;     `.fmt' file and compile metadata.
+;;
 ;;   * The on-disk SVG is COLOR-INDEPENDENT: dvisvgm `--currentcolor' emits
 ;;     the default ink as the literal token `currentColor', which is
 ;;     substituted with the buffer foreground at display time.  A theme
@@ -111,29 +116,32 @@
 (require 'latex-to-svg-backend-core)
 (require 'latex-to-svg-backend-latex)
 (require 'latex-to-svg-backend-ratex)
+(require 'latex-to-svg-backend-texres)
 
 ;;;; Engine
 
 (defun latex-to-svg-backend--engine (engine)
-  "Return ENGINE as `latex' or `ratex'; nil is `latex'.
+  "Return ENGINE as `latex', `ratex' or `texres'; nil is `latex'.
 Signals an error for any other value: a misspelt engine is a caller
 bug, and quietly falling back to LaTeX would hide it."
   (pcase engine
     ('nil 'latex)
-    ((or 'latex 'ratex) engine)
-    (_ (error "Unknown engine %S: want `latex', `ratex' or nil" engine))))
+    ((or 'latex 'ratex 'texres) engine)
+    (_ (error "Unknown engine %S: want `latex', `ratex', `texres' or nil"
+              engine))))
 
 ;;;; Capability
 
 (defun latex-to-svg-backend-tools-available-p (&optional engine)
   "Return non-nil when the programs of ENGINE are found.
-ENGINE is `latex' (the default, also nil) or `ratex', as for
+ENGINE is `latex' (the default, also nil), `ratex' or `texres', as for
 `latex-to-svg-backend'.  The programs are looked up on the variable
 `exec-path': `latex' and `dvisvgm' for the LaTeX engine, `render-svg'
-for the RaTeX one."
+for the RaTeX one, `texres' and `pdftocairo' for the texres one."
   (pcase (latex-to-svg-backend--engine engine)
     ('latex (latex-to-svg-backend--latex-tools-available-p))
-    ('ratex (latex-to-svg-backend--ratex-tools-available-p))))
+    ('ratex (latex-to-svg-backend--ratex-tools-available-p))
+    ('texres (latex-to-svg-backend--texres-tools-available-p))))
 
 ;;;; State
 
@@ -167,25 +175,27 @@ Do NOT tie this to the TeX/dvisvgm version — upgrading TeX Live should
 not wipe the cache.  Change it by hand, only for a real incompatibility.")
 
 (defun latex-to-svg-backend--inputs ()
-  "Return what both engines read from the current buffer, as a plist.
-That is `latex-to-svg-backend--latex-inputs' and
-`latex-to-svg-backend--ratex-inputs' together.  `latex-to-svg-backend'
-reads it once, in the requesting buffer, and passes it to the cache
-key, the compile, its retry and the fallback: the last two start from
-the process sentinel, where the current buffer is another."
+  "Return what the engines read from the current buffer, as a plist.
+That is `latex-to-svg-backend--latex-inputs', which the texres engine
+reads too, and `latex-to-svg-backend--ratex-inputs' together.
+`latex-to-svg-backend' reads it once, in the requesting buffer, and
+passes it to the cache key, the compile, its retry and the fallback:
+the last two start from the process sentinel, where the current buffer
+is another."
   (append (latex-to-svg-backend--latex-inputs)
           (latex-to-svg-backend--ratex-inputs)))
 
 (defun latex-to-svg-backend--cache-key (latex &optional engine inputs)
   "Return a stable content cache key for LATEX rendered by ENGINE.
-ENGINE is `latex' (the default, also nil) or `ratex'; the caller has
-checked it (see `latex-to-svg-backend--engine').  INPUTS is the plist
+ENGINE is `latex' (the default, also nil), `ratex' or `texres'; the
+caller has checked it (see `latex-to-svg-backend--engine').  INPUTS is the plist
 of `latex-to-svg-backend--inputs', nil meaning the current buffer's.
 The engine's input besides LATEX is folded in so changing it
 invalidates the cache: the preamble and the not-precompiled text for
 the LaTeX engine (see `latex-to-svg-backend--latex-cache-salt'; without
 a not-precompiled text, the key is the one it had before RaTeX was
-added), the engine's name and its macros for the RaTeX one.  So is
+added), the engine's name and its macros for the RaTeX one, the
+engine's name and the LaTeX engine's text for the texres one.  So is
 `latex-to-svg-backend--cache-version', so a pipeline change re-keys warm
 caches.  LATEX is the verbatim document body, so any change to it —
 including inline vs display delimiters or an injected `\setcounter' for
@@ -202,7 +212,10 @@ display time), so neither size nor color is part of this key."
                                  (or inputs (latex-to-svg-backend--latex-inputs))))
                                ('ratex
                                 (latex-to-svg-backend--ratex-cache-salt
-                                 (or inputs (latex-to-svg-backend--ratex-inputs))))))))
+                                 (or inputs (latex-to-svg-backend--ratex-inputs))))
+                               ('texres
+                                (latex-to-svg-backend--texres-cache-salt
+                                 (or inputs (latex-to-svg-backend--latex-inputs))))))))
 
 ;;;; Compile queue
 
@@ -211,10 +224,11 @@ display time), so neither size nor color is part of this key."
 
 KEY identifies the equation; WAITER is what to notify (see
 `latex-to-svg-backend--waiter').  LATEX is forwarded to the compile of
-ENGINE (`latex', the default, also nil, or `ratex'):
-`latex-to-svg-backend--compile', along with METADATA (the INITIAL value
-for the `.eld' sidecar), or `latex-to-svg-backend--ratex-compile',
-which writes no sidecar; both along with INPUTS (as for
+ENGINE (`latex', the default, also nil, `ratex' or `texres'):
+`latex-to-svg-backend--compile' or `latex-to-svg-backend--texres-compile',
+along with METADATA (the INITIAL value for the `.eld' sidecar), or
+`latex-to-svg-backend--ratex-compile', which writes no sidecar; all
+along with INPUTS (as for
 `latex-to-svg-backend--cache-key').
 Multiple waiters sharing KEY (the same equation requested more than
 once) are coalesced onto a single compile; all are notified when it
@@ -238,7 +252,10 @@ INPUTS does not hold."
              ((or 'nil 'latex)
               (latex-to-svg-backend--compile key latex metadata inputs))
              ('ratex
-              (latex-to-svg-backend--ratex-compile key latex inputs)))))))))
+              (latex-to-svg-backend--ratex-compile key latex inputs))
+             ('texres
+              (latex-to-svg-backend--texres-compile
+               key latex metadata inputs)))))))))
 
 ;;;; Failed compiles and the fallback engine
 
@@ -298,13 +315,18 @@ that shows the equations."
                ('latex (format "`%s' and `%s'"
                                latex-to-svg-backend-latex-program
                                latex-to-svg-backend-dvisvgm-program))
-               ('ratex (format "`%s'" latex-to-svg-backend-ratex-program)))
-             (if (eq fallback 'latex) "were" "was")
-             (if (eq fallback 'latex) "them" "it")
+               ('ratex (format "`%s'" latex-to-svg-backend-ratex-program))
+               ('texres (format "`%s' and `%s'"
+                                latex-to-svg-backend-texres-program
+                                latex-to-svg-backend-pdftocairo-program)))
+             (if (eq fallback 'ratex) "was" "were")
+             (if (eq fallback 'ratex) "it" "them")
              (pcase-exhaustive fallback
                ('latex "`latex-to-svg-backend-latex-program' and \
 `latex-to-svg-backend-dvisvgm-program'")
-               ('ratex "`latex-to-svg-backend-ratex-program'")))
+               ('ratex "`latex-to-svg-backend-ratex-program'")
+               ('texres "`latex-to-svg-backend-texres-program' and \
+`latex-to-svg-backend-pdftocairo-program'")))
      :warning))
   (unless quiet
     (latex-to-svg-backend--report-failure key latex engine buffer)))
@@ -375,9 +397,12 @@ default, also nil) runs `latex' and `dvisvgm' (options in the
 preamble loads, from a TeX installation.  `ratex' runs RaTeX's
 `render-svg' (options in the `latex-to-svg-backend-ratex' group): one
 program and no TeX installation, for the math KaTeX supports and no
-packages.  Any other value signals an error.  The engine is part of
-the cache key, so each engine's SVGs stay cached when a caller
-switches to the other.  As for COLOR, a front-end owns the user
+packages.  `texres' runs the `pdflatex' of texres, then `pdftocairo'
+\(options in the `latex-to-svg-backend-texres' group): full LaTeX with
+the LaTeX engine's preamble, from one program instead of a TeX
+installation.  Any other value signals an error.  The engine is part
+of the cache key, so each engine's SVGs stay cached when a caller
+switches to another.  As for COLOR, a front-end owns the user
 preference and passes it here.
 
 When ENGINE rejects LATEX -- a RaTeX parse error, or a LaTeX error in
@@ -405,7 +430,7 @@ METADATA, when non-nil and `latex-to-svg-backend-metadata-prefix' is set, is the
 INITIAL value stored in this equation's `.eld' sidecar (see
 `latex-to-svg-backend-metadata'); the FINAL value is captured from the compile
 log.  It is only recorded when a compile actually runs (a miss), and
-only by the LaTeX engine.
+only by the LaTeX and texres engines.
 
 RESCALE-BY (default 1.0) multiplies the base display size for this one
 call, on top of the global `latex-to-svg-backend-font-scale'.  The
@@ -589,7 +614,8 @@ buffer; this takes it from a caller that computed it elsewhere."
 (defun latex-to-svg-backend-metadata (latex &optional engine)
   "Return cached compile metadata for LATEX rendered by ENGINE, or nil.
 ENGINE is as for `latex-to-svg-backend'.  Only the LaTeX engine
-writes metadata, so this is always nil for `ratex'.
+and the texres engine write metadata, so this is always nil for
+`ratex'.
 
 Returns the plist `(:nums (INITIAL . FINAL))' read from LATEX's
 `.eld' sidecar: INITIAL is the caller's `:metadata' at render time and

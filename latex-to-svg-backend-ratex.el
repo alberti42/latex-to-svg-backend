@@ -149,7 +149,8 @@ See `latex-to-svg-backend--crop-to-ink'; the default ink is drawn in
 `latex-to-svg-backend--ratex-ink'.  RaTeX sizes its SVG from the font
 metrics, so glyph overshoot falls outside the viewport and side
 bearings stay inside it, until the crop."
-  (latex-to-svg-backend--crop-to-ink svg latex-to-svg-backend--ratex-ink-svg))
+  (latex-to-svg-backend--crop-to-ink
+   svg (regexp-quote latex-to-svg-backend--ratex-ink-svg)))
 
 (defun latex-to-svg-backend--ratex-store (output svg)
   "Write RaTeX's OUTPUT file to the cache file SVG, ready for display.

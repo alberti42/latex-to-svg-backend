@@ -58,9 +58,10 @@ Equation numbering used to be the gap: the AUCTeX-based packages compile a whole
 ## Requirements
 
 - Emacs 29.1+ with SVG image support.
-- The programs of one of the two [engines](#engines) on `exec-path`:
+- The programs of one of the three [engines](#engines) on `exec-path`:
   - LaTeX (the default): `latex` and `dvisvgm` 3.1 or later, from any TeX distribution (TeX Live 2024 or later ships it). dvisvgm 3.1 added `--currentcolor`, which makes the SVG color-independent.
   - RaTeX: its `render-svg` program, v0.1.14 or later. No TeX installation. What [Engines](#engines) says about RaTeX was checked with v0.1.14.
+  - texres: `texres` 0.7.7 or later, and `pdftocairo` from Poppler. No TeX Live installation. texres 0.7.7 fixed the dump of the `.fmt` file; with an older texres every equation compiles with the full preamble.
 
   Without them, a placeholder panel boxing the raw LaTeX is shown instead (or set `latex-to-svg-backend-use-placeholder`).
 
@@ -107,8 +108,9 @@ The `:engine` argument of `latex-to-svg-backend` chooses the program that typese
 
 - **`latex`** (the default, also `nil`) runs `latex` and `dvisvgm`. It is full LaTeX: any package the preamble loads, any macro it defines.
 - **`ratex`** runs `render-svg` from [RaTeX](https://github.com/erweixin/RaTeX), a math renderer written in Rust that parses KaTeX's syntax. It is one program and needs no TeX installation, but it typesets only the math KaTeX supports, and it loads no packages.
+- **`texres`** runs the `pdflatex` of [texres](https://github.com/leoliu0/texres), a TeX distribution in a single executable written in Rust, then `pdftocairo -svg` from [Poppler](https://poppler.freedesktop.org). It is full LaTeX, with the LaTeX engine's preamble options, and needs no TeX Live installation.
 
-Both produce the same color- and size-independent SVG, cropped to the ink, so everything under [API](#api) works the same with either. The engine is part of the cache key, so each engine's SVGs stay cached when a caller switches to the other.
+All three produce the same color- and size-independent SVG, cropped to the ink, so everything under [API](#api) works the same with each. The engine is part of the cache key, so each engine's SVGs stay cached when a caller switches to another.
 
 The engine is chosen per call, like `:color`: a front-end owns the user's choice and passes it. The backend has no option for it. A caller that passes no `:engine`, such as [`agent-shell-math-renderer`](https://github.com/alberti42/agent-shell-math-renderer) today, gets the LaTeX engine. In the [`latex-to-svg`](https://github.com/alberti42/latex-to-svg) front-end, `latex-to-svg-frontend-engine` chooses it, also as a file- or directory-local variable, and a comment at the top of a display equation (`% engine=ratex`) chooses the engine for that equation or skips it; see that package's README.
 
@@ -127,9 +129,19 @@ What changes with RaTeX, from RaTeX v0.1.14:
 - **Look.** The glyphs are KaTeX's fonts, and the layout is RaTeX's implementation of KaTeX's, so it can differ from TeX's in detail. Text in `\text{}` that the KaTeX fonts lack is drawn in a system font.
 - **Speed.** A new equation compiles in 6–7 ms instead of 313–316 ms (medians); see [Benchmark](#benchmark).
 
+To use texres, install it (see its README; on macOS `brew install leoliu0/texres/texres`) and Poppler, which provides `pdftocairo`, or set `latex-to-svg-backend-texres-program` and `latex-to-svg-backend-pdftocairo-program` to their paths. A front-end then passes `:engine 'texres`.
+
+What changes with texres, from texres 0.7.7:
+
+- **The same LaTeX.** `latex-to-svg-backend-preamble`, `-appended-preamble`, `-preamble-not-precompiled`, `-line-width`, `-precompile` and `-metadata-prefix` apply as for the LaTeX engine, and compile metadata works. texres dumps its own `.fmt` file, next to the LaTeX engine's.
+- **A link named `pdflatex`.** texres runs one `pdflatex` pass only when it is called by that name, so the backend makes a symbolic link to it in the `texres/` subdirectory of the cache. Nothing on `exec-path` is shadowed.
+- **PDF, then SVG.** texres writes PDF, which `pdftocairo -svg -noshrink` converts; the backend crops the SVG to the ink, as `dvisvgm --exact-bbox` does. A rule that ends the ink (a fraction bar, the bar of a root) leaves the box 0.2pt wider on each side than with `dvisvgm`.
+- **The ink.** The backend writes `\color[RGB]{1,2,3}` before the equation and turns that color into `currentColor`, so a formula's own `\color{black}` stays black. This needs `xcolor`, which the default preamble loads; without it, black becomes `currentColor`.
+- **Speed.** Measured with the batch command under [Benchmark](#benchmark), a new equation compiled in 86–91 ms instead of LaTeX's 323–367 ms (medians), and the 20 equations queued at once in 402–460 ms instead of 1522–1700 ms.
+
 ## Benchmark
 
-The time to compile a new equation, with each engine, for the 20 equations in [`dev/latex-to-svg-backend-benchmark.el`](dev/latex-to-svg-backend-benchmark.el) (inline and display math, `equation`, `align`, matrices, `cases`). Every run starts from an empty cache, so every equation compiles. A cached equation costs the same with either engine, because neither runs: showing it again, a theme switch and a font change are all cache hits.
+The time to compile a new equation, with each engine, for the 20 equations in [`dev/latex-to-svg-backend-benchmark.el`](dev/latex-to-svg-backend-benchmark.el) (inline and display math, `equation`, `align`, matrices, `cases`). Every run starts from an empty cache, so every equation compiles. A cached equation costs the same with every engine, because none runs: showing it again, a theme switch and a font change are all cache hits.
 
 | | LaTeX (`latex` + `dvisvgm`, `.fmt`) | RaTeX (`render-svg`) |
 | --- | ---: | ---: |
@@ -164,7 +176,7 @@ In a running Emacs, load `dev/latex-to-svg-backend-benchmark.el` and call `M-x l
 
 Returns an image now when one can be produced synchronously (cache / on-disk SVG / placeholder), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile. At most `latex-to-svg-backend-jobs` compiles run at once; further compiles wait in a queue and start, oldest first, as running ones end.
 
-`ENGINE` is `latex` (the default, also `nil`) or `ratex`; see [Engines](#engines). Any other value signals an error. `FALLBACK` names an engine that typesets `LATEX` when `ENGINE` rejects it, and `QUIET` drops the warning a failed compile gives; see [Failed compiles](#failed-compiles-and-the-fallback-engine).
+`ENGINE` is `latex` (the default, also `nil`), `ratex` or `texres`; see [Engines](#engines). Any other value signals an error. `FALLBACK` names an engine that typesets `LATEX` when `ENGINE` rejects it, and `QUIET` drops the warning a failed compile gives; see [Failed compiles](#failed-compiles-and-the-fallback-engine).
 
 `RESCALE-BY` (default `1.0`) multiplies the display size of this one call on top of `latex-to-svg-backend-font-scale`. The backend has no inline/display awareness, so a front-end that wants display equations a touch larger than inline passes, say, `:rescale-by 1.1` for display and nothing for inline. It is a display-time scale only — same on-disk SVG, no recompile — and folds into the in-memory image cache key, so both sizes coexist. `METADATA` is documented under [Compile metadata](#compile-metadata-eld-sidecar) below.
 
@@ -245,9 +257,9 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 
 ## Customization
 
-`M-x customize-group RET latex-to-svg-backend` shows the options of both engines, with those of each engine in its own subgroup (`latex-to-svg-backend-latex`, `latex-to-svg-backend-ratex`). Which engine each option and command belongs to (the `latex-to-svg-backend-` prefix is left out):
+`M-x customize-group RET latex-to-svg-backend` shows the options of all engines, with those of each engine in its own subgroup (`latex-to-svg-backend-latex`, `latex-to-svg-backend-ratex`, `latex-to-svg-backend-texres`). Which engine each option and command belongs to (the `latex-to-svg-backend-` prefix is left out):
 
-| Both engines | LaTeX only | RaTeX only |
+| All engines | LaTeX and texres | RaTeX only |
 | --- | --- | --- |
 | `-cache-directory` | `-latex-program` | `-ratex-program` |
 | `-cache-max-age` | `-dvisvgm-program` | `-ratex-macros` |
@@ -259,9 +271,11 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 | `-svg-dpi` | `-precompile` | |
 | `M-x …-gc`, `…-clear-cache`, `…-invalidate` | `M-x …-flush-format`, `…-invalidate-format` | |
 
+The texres engine has two options of its own, `-texres-program` and `-pdftocairo-program`, in the subgroup `latex-to-svg-backend-texres`; `-latex-program` and `-dvisvgm-program` are the LaTeX engine's only.
+
 There is no option for the engine: the caller chooses it per call (see [Engines](#engines)).
 
-The functions under [API](#api) work with both; `latex-to-svg-backend-metadata` returns `nil` for an equation RaTeX rendered.
+The functions under [API](#api) work with all three; `latex-to-svg-backend-metadata` returns `nil` for an equation RaTeX rendered.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -283,6 +297,8 @@ The functions under [API](#api) work with both; `latex-to-svg-backend-metadata` 
 | `latex-to-svg-backend-precompile` | `t` | preamble precompilation to a `.fmt` (below) |
 | `latex-to-svg-backend-ratex-program` | `"render-svg"` | RaTeX's `render-svg` binary |
 | `latex-to-svg-backend-ratex-macros` | `""` | macro definitions put in front of every formula RaTeX renders |
+| `latex-to-svg-backend-texres-program` | `"texres"` | the `texres` binary |
+| `latex-to-svg-backend-pdftocairo-program` | `"pdftocairo"` | Poppler's `pdftocairo` binary |
 
 ### A project's preamble
 
