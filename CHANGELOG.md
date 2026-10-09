@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-09
+
+### Fixed
+
+- The texres engine signaled `void-function` on Emacs 29 to 31 when it
+  cropped an SVG: the crop called `string-remove-prefix`, which is in
+  `subr-x` and not preloaded before Emacs 32. The byte-compiler reported
+  it too.
+
 ## [0.12.0] - 2026-10-09
 
 ### Added
@@ -483,7 +492,8 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
-[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.10.0...v0.11.0
