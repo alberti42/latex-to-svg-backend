@@ -59,8 +59,8 @@ Equation numbering used to be the gap: the AUCTeX-based packages compile a whole
 
 - Emacs 29.1+ with SVG image support.
 - The programs of one of the two [engines](#engines) on `exec-path`:
-  - LaTeX (the default): `latex` and `dvisvgm`, from any TeX distribution.
-  - RaTeX: its `render-svg` program. No TeX installation.
+  - LaTeX (the default): `latex` and `dvisvgm` 3.1 or later, from any TeX distribution (TeX Live 2024 or later ships it). dvisvgm 3.1 added `--currentcolor`, which makes the SVG color-independent.
+  - RaTeX: its `render-svg` program, v0.1.14 or later. No TeX installation. What [Engines](#engines) says about RaTeX was checked with v0.1.14.
 
   Without them, a placeholder panel boxing the raw LaTeX is shown instead (or set `latex-to-svg-backend-use-placeholder`).
 
