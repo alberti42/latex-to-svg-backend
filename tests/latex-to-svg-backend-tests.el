@@ -604,6 +604,7 @@
   (let ((latex-to-svg-backend--pending (make-hash-table :test 'equal))
         (latex-to-svg-backend--queue nil)
         (latex-to-svg-backend--running nil)
+        (latex-to-svg-backend-jobs 100)
         (compiles 0))
     (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t))
               ((symbol-function 'latex-to-svg-backend--cached-image) (lambda (&rest _) nil))
@@ -685,6 +686,9 @@ completion event."
           (latex-to-svg-backend--pending (make-hash-table :test 'equal))
           (latex-to-svg-backend--queue nil)
           (latex-to-svg-backend--running nil)
+          ;; Tests leave compiles unfinished, each holding a slot: on a
+          ;; machine with few processors the next one would queue.
+          (latex-to-svg-backend-jobs 100)
           (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
           (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal))
           (latex-to-svg-backend--warned (make-hash-table :test 'equal))
@@ -1735,6 +1739,7 @@ Return the SVG path."
          (latex-to-svg-backend--pending (make-hash-table :test 'equal))
          (latex-to-svg-backend--queue nil)
          (latex-to-svg-backend--running nil)
+         (latex-to-svg-backend-jobs 100)
          (latex-to-svg-backend-ratex-macros "")
          (doc "$x$")
          (latex-key (latex-to-svg-backend--cache-key doc 'latex))

@@ -713,7 +713,9 @@ grows by half its `stroke-width', scaled by the transform."
                   ("use"
                    (when-let* ((href (or (funcall attr "xlink:href")
                                          (funcall attr "href")))
-                               (glyph (cdr (assoc (string-remove-prefix "#" href)
+                               (glyph (cdr (assoc (if (string-prefix-p "#" href)
+                                                      (substring href 1)
+                                                    href)
                                                   glyphs))))
                      (pcase-let ((`(,x0 ,y0 ,x1 ,y1) glyph)
                                  (x (funcall num "x"))
