@@ -124,25 +124,34 @@ temporary cache directory."
     (format "%-5s %-10s ok %2d/%2d  %s%s"
             (plist-get run :engine) (plist-get run :mode)
             (plist-get run :done) (plist-get run :total)
-            (if-let* ((wall (plist-get run :wall)))
+            (cond
+             ((plist-get run :wall)
+              (let ((wall (plist-get run :wall)))
                 (format "total %5d ms  (%d ms per equation)"
                         (funcall ms wall)
-                        (funcall ms (/ wall (plist-get run :total))))
-              (format "median %4d  min %4d  max %4d ms"
-                      (funcall ms (nth (/ n 2) sorted))
-                      (funcall ms (car sorted))
-                      (funcall ms (car (last sorted)))))
+                        (funcall ms (/ wall (plist-get run :total))))))
+             ((zerop n) "no equation compiled")
+             (t (format "median %4d  min %4d  max %4d ms"
+                        (funcall ms (nth (/ n 2) sorted))
+                        (funcall ms (car sorted))
+                        (funcall ms (car (last sorted))))))
             (if-let* ((fmt (plist-get run :fmt)))
                 (format "  [.fmt build %d ms]" (funcall ms fmt))
               ""))))
 
 (defun latex-to-svg-backend-benchmark-report (&optional rounds)
   "Run ROUNDS rounds (default 2) of both engines in both modes.
-Return the report as a string."
-  (let (lines)
+An engine whose programs are not found is left out, with a line saying
+so.  Return the report as a string."
+  (let* ((engines (seq-filter #'latex-to-svg-backend-tools-available-p
+                              '(latex ratex)))
+         (lines (mapcar (lambda (engine)
+                          (format "%-5s skipped: its programs are not found"
+                                  engine))
+                        (seq-difference '(latex ratex) engines))))
     (dotimes (_ (or rounds 2))
       (dolist (mode '(sequential batch))
-        (dolist (engine '(latex ratex))
+        (dolist (engine engines)
           (push (latex-to-svg-backend-benchmark--line
                  (latex-to-svg-backend-benchmark--run engine mode))
                 lines))))
