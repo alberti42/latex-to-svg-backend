@@ -143,90 +143,13 @@ does for the LaTeX engine.  A formula's own `\\color' keeps its color.")
 (defconst latex-to-svg-backend--ratex-ink-svg "rgba(1,2,3,1)"
   "How RaTeX writes `latex-to-svg-backend--ratex-ink' in its SVG.")
 
-(defun latex-to-svg-backend--ratex-attribute (tag name)
-  "Return the value of attribute NAME in the SVG start TAG, or nil."
-  (when (string-match (concat "[[:space:]]" (regexp-quote name)
-                              "=\"\\([^\"]*\\)\"")
-                      tag)
-    (match-string 1 tag)))
-
-(defun latex-to-svg-backend--ratex-ink-box (svg)
-  "Return the box around the ink of RaTeX's SVG, as (X0 Y0 X1 Y1), or nil.
-dvisvgm's `--exact-bbox' crops the LaTeX engine's SVGs to their ink.
-RaTeX sizes its SVG from the font metrics instead, so glyph overshoot
-falls outside the viewport and side bearings stay inside it.
-
-RaTeX draws with `<path>' elements, whose coordinates are all absolute
-pairs, and with `<rect>' and `<line>'.  A path's box is taken over its
-control points, which bound the curve.  A stroked element's box grows
-by half its `stroke-width'.  Nil when SVG has none of these elements."
-  (let ((start 0) box)
-    (while (string-match "<\\(path\\|rect\\|line\\)[[:space:]][^>]*>" svg start)
-      (let ((tag (match-string 0 svg))
-            (kind (match-string 1 svg)))
-        (setq start (match-end 0))
-        (let* ((attr (lambda (name)
-                       (latex-to-svg-backend--ratex-attribute tag name)))
-               (num (lambda (name)
-                      (string-to-number (or (funcall attr name) "0"))))
-               (stroke (funcall attr "stroke"))
-               (grow (if (and stroke (not (equal stroke "none")))
-                         (/ (funcall num "stroke-width") 2.0)
-                       0))
-               (points
-                (pcase kind
-                  ("path"
-                   (seq-partition
-                    (mapcar #'string-to-number
-                            (split-string (or (funcall attr "d") "")
-                                          "[^-0-9.eE]+" t))
-                    2))
-                  ("rect"
-                   (let ((x (funcall num "x")) (y (funcall num "y")))
-                     (list (list x y)
-                           (list (+ x (funcall num "width"))
-                                 (+ y (funcall num "height"))))))
-                  ("line"
-                   (list (list (funcall num "x1") (funcall num "y1"))
-                         (list (funcall num "x2") (funcall num "y2")))))))
-          (pcase-dolist (`(,x ,y) points)
-            (when y
-              (setq box
-                    (if box
-                        (pcase-let ((`(,x0 ,y0 ,x1 ,y1) box))
-                          (list (min x0 (- x grow)) (min y0 (- y grow))
-                                (max x1 (+ x grow)) (max y1 (+ y grow))))
-                      (list (- x grow) (- y grow) (+ x grow) (+ y grow)))))))))
-    box))
-
 (defun latex-to-svg-backend--ratex-svg (svg)
   "Return RaTeX's SVG made color-independent and cropped to its ink, or nil.
-The default ink, drawn in `latex-to-svg-backend--ratex-ink', becomes
-`currentColor'.  The root element is rewritten with the viewport around
-the ink (see `latex-to-svg-backend--ratex-ink-box') and in the form
-dvisvgm writes it -- width and height in pt, values in single quotes --
-which is the form `latex-to-svg-backend--pad-svg' reads.  One SVG unit
-is one pt, as in the LaTeX engine's SVGs.  Nil when SVG has no root
-element."
-  (when (string-match "<svg\\b[^>]*>" svg)
-    (let* ((root-beg (match-beginning 0))
-           (root-end (match-end 0))
-           (view-box (latex-to-svg-backend--ratex-attribute
-                      (match-string 0 svg) "viewBox"))
-           (box (or (latex-to-svg-backend--ratex-ink-box svg)
-                    ;; Nothing drawn (`\,' alone, say): keep RaTeX's viewport.
-                    (pcase-let ((`(,x ,y ,w ,h)
-                                 (mapcar #'string-to-number
-                                         (split-string (or view-box "0 0 0 0")))))
-                      (list x y (+ x w) (+ y h))))))
-      (pcase-let ((`(,x0 ,y0 ,x1 ,y1) box))
-        (concat (substring svg 0 root-beg)
-                (format "<svg xmlns='http://www.w3.org/2000/svg' \
-width='%.4fpt' height='%.4fpt' viewBox='%.4f %.4f %.4f %.4f'>"
-                        (- x1 x0) (- y1 y0) x0 y0 (- x1 x0) (- y1 y0))
-                (string-replace latex-to-svg-backend--ratex-ink-svg
-                                "currentColor"
-                                (substring svg root-end)))))))
+See `latex-to-svg-backend--crop-to-ink'; the default ink is drawn in
+`latex-to-svg-backend--ratex-ink'.  RaTeX sizes its SVG from the font
+metrics, so glyph overshoot falls outside the viewport and side
+bearings stay inside it, until the crop."
+  (latex-to-svg-backend--crop-to-ink svg latex-to-svg-backend--ratex-ink-svg))
 
 (defun latex-to-svg-backend--ratex-store (output svg)
   "Write RaTeX's OUTPUT file to the cache file SVG, ready for display.
