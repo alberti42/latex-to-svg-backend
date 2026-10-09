@@ -927,7 +927,7 @@ completion event."
                 (setq metadata-seen (latex-to-svg-backend-metadata doc)))))
        latex-to-svg-backend--pending)
       (cl-letf (((symbol-function 'latex-to-svg-backend--ensure-format)
-                 (lambda (_preamble)
+                 (lambda (_preamble &optional _program)
                    (cl-incf ensure-calls)
                    fmt)))
         ;; As `--fill-slots' does: the compile holds a slot.
@@ -1377,7 +1377,7 @@ kept for symmetry with the compile pipeline."
   ;; With precompilation off, no `.fmt' file is dumped or consulted.
   (let ((latex-to-svg-backend-precompile nil))
     (cl-letf (((symbol-function 'latex-to-svg-backend--build-format)
-               (lambda (_k _preamble) (error "must not dump when disabled"))))
+               (lambda (_k _preamble &optional _program) (error "must not dump when disabled"))))
       (should-not (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble))))))
 
 (ert-deftest latex-to-svg-backend-ensure-format-builds-once-and-reuses ()
@@ -1391,10 +1391,10 @@ kept for symmetry with the compile pipeline."
     (unwind-protect
         (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
                    ;; A binary older than the about-to-be-built .fmt.
-                   (lambda () (let ((f (make-temp-file "l2s-bin")))
+                   (lambda (&optional _program) (let ((f (make-temp-file "l2s-bin")))
                                 (set-file-times f '(1 0)) f)))
                   ((symbol-function 'latex-to-svg-backend--build-format)
-                   (lambda (fkey _preamble)
+                   (lambda (fkey _preamble &optional _program)
                      (cl-incf builds)
                      (let ((f (latex-to-svg-backend--format-file fkey)))
                        (with-temp-file f (insert "fmt")) f))))
@@ -1423,9 +1423,9 @@ kept for symmetry with the compile pipeline."
           (with-temp-file fmt (insert "old"))
           (set-file-times fmt '(1 0))
           (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
-                     (lambda () newer-bin))
+                     (lambda (&optional _program) newer-bin))
                     ((symbol-function 'latex-to-svg-backend--build-format)
-                     (lambda (k _preamble)
+                     (lambda (k _preamble &optional _program)
                        (cl-incf builds)
                        (let ((f (latex-to-svg-backend--format-file k)))
                          (with-temp-file f (insert "new")) f))))
@@ -1453,7 +1453,7 @@ kept for symmetry with the compile pipeline."
           (should (gethash fkey latex-to-svg-backend--format-blocklist))
           ;; Blocklisted => ensure-format yields nil without rebuilding.
           (cl-letf (((symbol-function 'latex-to-svg-backend--build-format)
-                     (lambda (_k _preamble) (error "must not dump a blocklisted .fmt file"))))
+                     (lambda (_k _preamble &optional _program) (error "must not dump a blocklisted .fmt file"))))
             (should-not (latex-to-svg-backend--ensure-format (latex-to-svg-backend--preamble)))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
@@ -2394,7 +2394,7 @@ NEWEST is a function returning the most recently started fake process."
         (puthash key (list (latex-to-svg-backend--waiter #'ignore))
                  latex-to-svg-backend--pending)
         (cl-letf (((symbol-function 'latex-to-svg-backend--ensure-format)
-                   (lambda (_preamble) fmt))
+                   (lambda (_preamble &optional _program) fmt))
                   ((symbol-function 'display-warning) #'ignore))
           (latex-to-svg-backend--compile key doc)
           (should (equal (funcall source)
@@ -2543,7 +2543,7 @@ NEWEST is a function returning the most recently started fake process."
         (puthash key (list (latex-to-svg-backend--waiter #'ignore))
                  latex-to-svg-backend--pending)
         (cl-letf (((symbol-function 'latex-to-svg-backend--ensure-format)
-                   (lambda (_preamble) fmt))
+                   (lambda (_preamble &optional _program) fmt))
                   ((symbol-function 'display-warning) #'ignore))
           (latex-to-svg-backend--compile key doc)
           (with-temp-buffer
@@ -2655,9 +2655,9 @@ The binary is bound to `binary'; the dump is stubbed to write the
           (builds 0))
      (unwind-protect
          (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
-                    (lambda () binary))
+                    (lambda (&optional _program) binary))
                    ((symbol-function 'latex-to-svg-backend--build-format)
-                    (lambda (fkey _preamble)
+                    (lambda (fkey _preamble &optional _program)
                       (cl-incf builds)
                       (let ((f (latex-to-svg-backend--format-file fkey)))
                         (with-temp-file f (insert "fmt"))
@@ -2693,7 +2693,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
       (let ((binary (make-temp-file "l2s-other-bin")))
         (unwind-protect
             (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
-                       (lambda () binary)))
+                       (lambda (&optional _program) binary)))
               (funcall new-session)
               (should (= builds 3)))
           (delete-file binary)))
@@ -2726,7 +2726,7 @@ The binary is bound to `binary'; the dump is stubbed to write the
          argv source)
     (unwind-protect
         (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
-                   (lambda () binary))
+                   (lambda (&optional _program) binary))
                   ((symbol-function 'call-process)
                    (lambda (_program _infile _buffer _display &rest args)
                      (setq argv args
