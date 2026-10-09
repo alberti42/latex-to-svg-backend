@@ -732,7 +732,7 @@ re-tints from cache without recompiling."
                 (and (eq (car exit) 'latex)
                      (latex-to-svg-backend--latex-formula-error-p dir)))))
            (unless retry-format
-             (remhash key latex-to-svg-backend--pending))
+             (latex-to-svg-backend--compile-done key))
            (when (buffer-live-p output-buffer)
              (kill-buffer output-buffer))
            (funcall cleanup))

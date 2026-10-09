@@ -793,6 +793,12 @@ reported and does not keep the others from running."
       (error
        (message "latex-to-svg-backend: callback error: %S" cb-err)))))
 
+(defun latex-to-svg-backend--compile-done (key)
+  "Forget the waiters of KEY's compile, which has ended.
+Called once the waiters were notified or the failure handled, so a
+request for KEY from now on finds the SVG or compiles again."
+  (remhash key latex-to-svg-backend--pending))
+
 (defun latex-to-svg-backend--report-failure (key latex engine &optional buffer)
   "Warn that ENGINE could not compile LATEX, whose content key is KEY.
 Once per equation per BUFFER, the buffer that requested it, which the

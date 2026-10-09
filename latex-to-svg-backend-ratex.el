@@ -322,7 +322,7 @@ RaTeX emits no compile metadata, so no `.eld' sidecar is written."
                (latex-to-svg-backend--compile-failed
                 key latex dir output 'ratex
                 (latex-to-svg-backend--ratex-formula-error-p exit output))))
-         (remhash key latex-to-svg-backend--pending)
+         (latex-to-svg-backend--compile-done key)
          (when (buffer-live-p output-buffer)
            (kill-buffer output-buffer))
          (delete-directory dir t))))))
