@@ -38,10 +38,11 @@ the font height it measured on the frame that shows its buffer.
   non-nil value is reported once per session.
   `latex-to-svg-backend-available-p` now checks only that this Emacs can
   display SVG images; it no longer requires a graphical selected frame.
-  Whether to request a render for a buffer shown only on a terminal is
-  the front-end's decision, with an option of its own:
-  `latex-to-svg-frontend-render-on-non-graphic`,
-  `agent-shell-math-renderer-render-on-non-graphic`.
+  Whether to request a render is the front-end's decision. Rendering
+  while no frame is graphical is no longer supported; if your workflow
+  needs it, please open an issue at
+  <https://github.com/alberti42/latex-to-svg-backend/issues> describing
+  that workflow.
 
 ### Removed
 

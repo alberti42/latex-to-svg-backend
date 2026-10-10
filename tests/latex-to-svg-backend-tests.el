@@ -118,8 +118,9 @@
     (should-not (latex-to-svg-backend-available-p))))
 
 (ert-deftest latex-to-svg-backend-warns-once-of-the-obsolete-option ()
-  ;; `-render-on-non-graphic' has no effect since 0.14.0; set, it is
-  ;; reported once per session, and a request still goes ahead.
+  ;; `-render-on-non-graphic' has no effect since 0.14.0, and the feature
+  ;; is no longer supported; set, it is reported once per session, and a
+  ;; request still goes ahead.
   (let ((latex-to-svg-backend--warned (make-hash-table :test 'equal))
         (warnings nil))
     (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) #'ignore)
@@ -135,7 +136,12 @@
           (latex-to-svg-backend "$x$")
           (latex-to-svg-backend "$y$")))
       (should (= 1 (seq-count (lambda (m) (string-search "obsolete" m))
-                              warnings))))))
+                              warnings)))
+      ;; It asks for the workflow that needs it.
+      (should (seq-some (lambda (m)
+                          (string-search
+                           "github.com/alberti42/latex-to-svg-backend/issues" m))
+                        warnings)))))
 
 ;;;; Scale
 

@@ -98,18 +98,18 @@ buffer font across themes, faces, and text scale."
 
 (defcustom latex-to-svg-backend-render-on-non-graphic nil
   "Obsolete since 0.14.0, and without effect.
-Whether to render equations for a buffer shown only on a terminal is
-the front-end's decision, since only the front-end knows which frame
-shows the buffer: set `latex-to-svg-frontend-render-on-non-graphic' or
-`agent-shell-math-renderer-render-on-non-graphic' instead.  A non-nil
-value is reported once per session."
+Rendering equations while no frame is graphical is no longer
+supported: whether to render is the front-end's decision, since only
+the front-end knows which frame shows the buffer, and the front-ends
+compile nothing while every frame is a terminal frame.  A non-nil value
+is reported once per session."
   :type 'boolean
   :safe #'booleanp
   :group 'latex-to-svg-backend)
 
 (make-obsolete-variable
  'latex-to-svg-backend-render-on-non-graphic
- "set the option of the front-end instead, such as \=`latex-to-svg-frontend-render-on-non-graphic'."
+ "rendering while no frame is graphical is no longer supported."
  "0.14.0")
 
 (defcustom latex-to-svg-backend-svg-dpi 96.0
@@ -307,10 +307,11 @@ is read on every request."
     (display-warning
      'latex-to-svg-backend
      "`latex-to-svg-backend-render-on-non-graphic' is obsolete since 0.14.0 \
-and has no effect.
-Set the option of the front-end instead, such as \
-`latex-to-svg-frontend-render-on-non-graphic' or \
-`agent-shell-math-renderer-render-on-non-graphic'."
+and has no effect: rendering while no frame is graphical is no longer \
+supported.
+If your workflow needs it, please open an issue at \
+https://github.com/alberti42/latex-to-svg-backend/issues describing \
+that workflow."
      :warning)))
 
 ;;;; Cache addressing
