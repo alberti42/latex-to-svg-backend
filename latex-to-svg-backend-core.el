@@ -96,24 +96,6 @@ buffer font across themes, faces, and text scale."
   :safe #'numberp
   :group 'latex-to-svg-backend)
 
-(defcustom latex-to-svg-backend-render-on-non-graphic nil
-  "When non-nil, render equation images even on a non-graphical frame.
-
-By default equations are only compiled when the selected frame is
-graphical (`display-graphic-p').  In an Emacs daemon a buffer may
-be rendered while a TTY frame is selected, yet later viewed in a
-graphical frame; without this the equation would never have been
-produced and stays raw text in the GUI too.
-
-Set non-nil (typically in a daemon setup) to always compile the
-SVG when the build supports it: it is ignored on a TTY frame (the
-raw LaTeX shows) but appears as soon as a graphical frame views
-the buffer.  The trade-off is that a purely terminal session then
-spawns LaTeX compiles whose images it never displays."
-  :type 'boolean
-  :safe #'booleanp
-  :group 'latex-to-svg-backend)
-
 (defcustom latex-to-svg-backend-svg-dpi 96.0
   "Dots-per-inch Emacs's SVG renderer uses to convert points to pixels.
 
@@ -278,15 +260,24 @@ know which frame shows the buffer.  The caller resolves it there."
 ;;;; Capability
 
 (defun latex-to-svg-backend-available-p ()
-  "Return non-nil when equation images should be produced.
+  "Return non-nil when this Emacs can display SVG images.
+The backend builds every image with `create-image' of type `svg', which
+needs an Emacs built with librsvg.  This depends on the build, not on a
+frame: whether to request a render, for a buffer shown only on a
+terminal say, is the front-end's decision."
+  (image-type-available-p 'svg))
 
-Requires SVG image support in this Emacs build, plus either a
-graphical selected frame or `latex-to-svg-backend-render-on-non-graphic'
-\(the daemon / mixed TTY+GUI case — the image is ignored on a TTY
-frame but shows once a graphical frame views the buffer)."
-  (and (image-type-available-p 'svg)
-       (or (display-graphic-p)
-           latex-to-svg-backend-render-on-non-graphic)))
+(defun latex-to-svg-backend--report-no-svg ()
+  "Warn that this Emacs cannot display SVG images, and return nil.
+Once per session (see `latex-to-svg-backend--mark-once'), even for a
+quiet request: it is a configuration problem, not the formula's."
+  (when (latex-to-svg-backend--mark-once "no SVG support")
+    (display-warning
+     'latex-to-svg-backend
+     "This Emacs cannot display SVG images: it was built without librsvg.
+Equations stay as LaTeX source."
+     :warning))
+  nil)
 
 ;;;; Cache addressing
 

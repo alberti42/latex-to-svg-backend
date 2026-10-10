@@ -107,23 +107,15 @@
 
 ;;;; Capability
 
-(ert-deftest latex-to-svg-backend-available-p-honors-non-graphic-opt-in ()
-  ;; Renderability requires SVG build support, and then either a graphical
-  ;; frame or the non-graphic opt-in (for daemon use).
-  (cl-letf (((symbol-function 'image-type-available-p) (lambda (_) t)))
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
-      (let ((latex-to-svg-backend-render-on-non-graphic nil))
-        (should-not (latex-to-svg-backend-available-p)))
-      (let ((latex-to-svg-backend-render-on-non-graphic t))
-        (should (latex-to-svg-backend-available-p))))
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t)))
-      (let ((latex-to-svg-backend-render-on-non-graphic nil))
-        (should (latex-to-svg-backend-available-p)))))
-  ;; No SVG support in the build => never renderable, even with the opt-in.
-  (cl-letf (((symbol-function 'image-type-available-p) (lambda (_) nil))
-            ((symbol-function 'display-graphic-p) (lambda (&rest _) t)))
-    (let ((latex-to-svg-backend-render-on-non-graphic t))
-      (should-not (latex-to-svg-backend-available-p)))))
+(ert-deftest latex-to-svg-backend-available-p-is-the-svg-build-support ()
+  ;; It depends on the build only: no frame is consulted.
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil))
+            ((symbol-function 'image-type-available-p)
+             (lambda (type) (eq type 'svg))))
+    (should (latex-to-svg-backend-available-p)))
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'image-type-available-p) #'ignore))
+    (should-not (latex-to-svg-backend-available-p))))
 
 ;;;; Scale
 
@@ -221,7 +213,8 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
 (ert-deftest latex-to-svg-backend-requires-a-hex-color ()
   ;; Checked before anything else, so a caller bug signals whether or not
   ;; the equation is cached or renderable.
-  (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () nil)))
+  (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () nil))
+            ((symbol-function 'display-warning) #'ignore))
     (should-error (latex-to-svg-backend "$x$" :font-height 20))
     (should-error (latex-to-svg-backend "$x$" :font-height 20 :color "grey50"))
     (should-error (latex-to-svg-backend "$x$" :color "#000000" :background "gray97"))
@@ -614,11 +607,20 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
 
 ;;;; Public entry point
 
-(ert-deftest latex-to-svg-backend-returns-nil-when-not-renderable ()
-  ;; Off a renderable display the entry point yields nil (caller keeps the
-  ;; raw text) and never schedules a compile.
-  (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () nil)))
-    (should-not (latex-to-svg-backend "E=mc^2"))))
+(ert-deftest latex-to-svg-backend-warns-once-without-svg-support ()
+  ;; Without SVG support the entry point yields nil (the caller keeps the
+  ;; LaTeX source), schedules no compile, and warns once per session, even
+  ;; for a quiet request.
+  (let ((latex-to-svg-backend--warned (make-hash-table :test 'equal))
+        (warnings 0))
+    (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) #'ignore)
+              ((symbol-function 'latex-to-svg-backend--enqueue)
+               (lambda (&rest _) (error "Compiled without SVG support")))
+              ((symbol-function 'display-warning)
+               (lambda (&rest _) (cl-incf warnings))))
+      (should-not (latex-to-svg-backend "$E=mc^2$" :callback #'ignore :quiet t))
+      (should-not (latex-to-svg-backend "$x$" :callback #'ignore))
+      (should (= warnings 1)))))
 
 (ert-deftest latex-to-svg-backend-schedules-and-coalesces-compiles ()
   ;; Renderable, tools present, SVG not yet on disk: the entry point returns

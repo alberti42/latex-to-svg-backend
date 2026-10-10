@@ -383,7 +383,8 @@ A failed compile warns once per equation per buffer, naming the buffer
 and linking to the log; QUIET non-nil drops that warning for this call.
 A program that is not found, ENGINE's or FALLBACK's, still warns, once
 per session per engine and program; the request then returns nil, and
-the next request runs the program again.
+the next request runs the program again.  An Emacs that cannot display
+SVG images also warns, once per session, even with QUIET.
 
 METADATA, when non-nil and `latex-to-svg-backend-metadata-prefix' is set, is the
 INITIAL value stored in this equation's `.eld' sidecar (see
@@ -435,11 +436,12 @@ Returns immediately with:
 
   * the cached / on-disk equation image when it is ready, or FALLBACK's
     when ENGINE failed;
-  * nil when equations aren't renderable (see
-    `latex-to-svg-backend-available-p') — the caller keeps the raw text;
+  * nil when this Emacs cannot display SVG images (see
+    `latex-to-svg-backend-available-p'), with a warning once per
+    session; nothing is compiled and the caller keeps the LaTeX source;
   * nil when ENGINE failed and there is no FALLBACK picture.
 
-When the equation is renderable but not yet compiled, returns nil and
+When the equation is not yet compiled, returns nil and
 schedules an asynchronous compile; CALLBACK (a zero-argument function)
 is invoked once, when the SVG is ready, so the caller can re-query
 \(call `latex-to-svg-backend' again, which now returns the image) and place
@@ -456,7 +458,8 @@ Call within the target buffer: the engines read their options there (see
   (latex-to-svg-backend--hex-color background :background)
   (when (and font-height (null color))
     (error "Missing :color: required with :font-height"))
-  (when (latex-to-svg-backend-available-p)
+  (if (not (latex-to-svg-backend-available-p))
+      (latex-to-svg-backend--report-no-svg)
     (let* ((inputs (latex-to-svg-backend--inputs))
            (key (latex-to-svg-backend--cache-key latex engine inputs))
            (compiled (file-exists-p (latex-to-svg-backend--svg-file key)))

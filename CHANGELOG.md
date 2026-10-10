@@ -27,12 +27,23 @@ the font height it measured on the frame that shows its buffer.
   `latex-to-svg-backend-display-scale` returns nil without a
   `font-height` for the same reason.
 
+- In an Emacs that cannot display SVG images (built without librsvg), a
+  request warns once per session, even with `:quiet`, and returns nil;
+  the LaTeX source stays in the buffer. Before, it returned nil with no
+  warning.
+
 ### Removed
 
 - `latex-to-svg-backend-appearance`. A front-end builds its own
   signature from the values it passes.
 
 - `latex-to-svg-backend-foreground-color`.
+
+- `latex-to-svg-backend-render-on-non-graphic`.
+  `latex-to-svg-backend-available-p` now checks only that this Emacs can
+  display SVG images; it no longer requires a graphical selected frame.
+  Whether to request a render for a buffer shown only on a terminal is
+  the front-end's decision.
 
 - `latex-to-svg-backend-use-placeholder` and the placeholder panel. For an
   equation the backend returns nil for, the front-end shows its LaTeX

@@ -199,7 +199,7 @@ Helpers a front-end typically needs for its refresh policy:
 
 | Function | Purpose |
 | --- | --- |
-| `latex-to-svg-backend-available-p` | SVG build support + graphical (or non-graphic opt-in) |
+| `latex-to-svg-backend-available-p` | whether this Emacs can display SVG images (built with librsvg). Without it a request compiles nothing, returns `nil` and warns once per session. It depends on the build, not on a frame: whether to request a render for a buffer shown only on a terminal is the front-end's decision |
 | `latex-to-svg-backend-tools-available-p` | the programs of an engine on `exec-path`: `latex` + `dvisvgm`, `render-svg` with the argument `ratex`, or `texres` + `pdftocairo` with `texres`. A request does not call it: it runs the programs, and a missing one is warned about |
 | `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font of height `font-height`, or `nil` when `font-height` is `nil` |
 | `latex-to-svg-backend-image-width` | the width in pixels at which an image the backend returned is displayed, computed from its SVG width and `:scale` (pt at `latex-to-svg-backend-svg-dpi` / 72 pixels), or `nil` |
@@ -211,7 +211,7 @@ Helpers a front-end typically needs for its refresh policy:
 
 When an engine rejects the formula — RaTeX cannot parse it, or LaTeX stops on an error in the document — the failure is recorded in the equation's `.eld` sidecar as `(:failed t)`, and a later request with the same `:engine` returns `nil` without compiling. A missing program, a crash or a killed process is not the formula's fault, so it is not recorded, and the next request compiles again. A missing program is warned about once per session per engine and program: "The texres engine could not run `pdftocairo': program not found." The record belongs to the cache key, so anything that changes the key retries on its own; `latex-to-svg-backend-invalidate` deletes the record for the rest (see [Troubleshooting](#troubleshooting)).
 
-A failed compile warns once per equation per buffer, naming the buffer and linking to the log. `:quiet t` drops that warning for the call; configuration problems (a missing program, an unwritable cache) still warn. The backend has no option for it: a front-end owns the user's choice and passes it, as for `:engine`.
+A failed compile warns once per equation per buffer, naming the buffer and linking to the log. `:quiet t` drops that warning for the call; configuration problems (a missing program, an unwritable cache, an Emacs without SVG support) still warn. The backend has no option for it: a front-end owns the user's choice and passes it, as for `:engine`.
 
 `:fallback 'latex` typesets a formula `ENGINE` rejected with LaTeX instead, under LaTeX's own cache key, so a later request with the same `:engine` and `:fallback` returns LaTeX's picture from cache. The callbacks queued for the failed compile fire when LaTeX's SVG is ready. The same string must be valid LaTeX: a macro defined only in `latex-to-svg-backend-ratex-macros` fails in both engines. When `latex` or `dvisvgm` is missing, the backend warns as for any missing program. The first fallback picture in a buffer is announced with a message such as `3 equations in notes.md fell back to LaTeX: RaTeX could not parse them`, since those pictures are typeset in LaTeX's style (Computer Modern) and RaTeX's in KaTeX's fonts. `latex-to-svg-backend-engine-used` tells a front-end which engine drew an image, for example for a tooltip.
 
@@ -280,8 +280,8 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 | `-gc-interval` | `-preamble` | |
 | `-font-scale` | `-appended-preamble` | |
 | `-jobs` | `-preamble-not-precompiled` | |
-| `-render-on-non-graphic` | `-line-width` | |
-| `-svg-dpi` | `-metadata-prefix` | |
+| `-svg-dpi` | `-line-width` | |
+| | `-metadata-prefix` | |
 | | `-precompile` | |
 | `M-x …-gc`, `…-clear-cache`, `…-invalidate` | `M-x …-flush-format`, `…-invalidate-format` | |
 
@@ -303,7 +303,6 @@ The functions under [API](#api) work with all three; `latex-to-svg-backend-metad
 | `latex-to-svg-backend-cache-max-age` | `90` | GC deletes equations untouched for this many days (`nil` = no age limit) |
 | `latex-to-svg-backend-gc-interval` | `1` | minimum days between automatic GC runs (`nil` = no automatic GC) |
 | `latex-to-svg-backend-font-scale` | `1.0` | equation size relative to the buffer font (1.0 = match) |
-| `latex-to-svg-backend-render-on-non-graphic` | `nil` | allow rendering on a non-graphical frame |
 | `latex-to-svg-backend-svg-dpi` | `96.0` | points→pixels constant for sizing; rarely needs changing |
 | `latex-to-svg-backend-jobs` | `nil` | maximum number of compiles to run at once (`nil` = the number of processors); further compiles wait in a queue |
 | `latex-to-svg-backend-metadata-prefix` | `nil` | `nil` = off; the `\typeout` prefix enabling `.eld` compile-metadata capture (above) |
