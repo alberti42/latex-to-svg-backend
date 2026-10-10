@@ -422,6 +422,33 @@ untouched, ages out, and recompiles."
     (file-error
      (latex-to-svg-backend--warn-once "recording cache use" err 'buffer))))
 
+;;;; SVG markup
+
+(defun latex-to-svg-backend--svg-root (svg)
+  "Return the bounds of SVG's root start tag, as (BEG . END), or nil."
+  (when (string-match "<svg\\b[^>]*>" svg)
+    (cons (match-beginning 0) (match-end 0))))
+
+(defun latex-to-svg-backend--svg-attribute-regexp (name)
+  "Return a regexp matching attribute NAME in an SVG start tag.
+Group 1 is a double-quoted value, group 2 a single-quoted one: svg.el,
+RaTeX and pdftocairo write the first, dvisvgm and
+`latex-to-svg-backend--crop-to-ink' the second."
+  (concat "[[:space:]]" (regexp-quote name)
+          "=\\(?:\"\\([^\"]*\\)\"\\|'\\([^']*\\)'\\)"))
+
+(defun latex-to-svg-backend--svg-attribute (tag name)
+  "Return the value of attribute NAME in the SVG start TAG, or nil."
+  (when (string-match (latex-to-svg-backend--svg-attribute-regexp name) tag)
+    (or (match-string 1 tag) (match-string 2 tag))))
+
+(defun latex-to-svg-backend--svg-set-attribute (tag name value)
+  "Return the SVG start TAG with attribute NAME set to VALUE.
+The quotes are kept.  TAG is returned unchanged when it has no NAME."
+  (if (string-match (latex-to-svg-backend--svg-attribute-regexp name) tag)
+      (replace-match value t t tag (if (match-beginning 1) 1 2))
+    tag))
+
 ;;;; Scale
 
 (defun latex-to-svg-backend--svg-px-per-pt ()
@@ -470,11 +497,11 @@ or holds no SVG width."
   (when-let* (((eq (car-safe image) 'image))
               (data (image-property image :data))
               ((stringp data))
-              ((string-match "<svg\\b[^>]*>" data))
-              (tag (match-string 0 data))
-              ((string-match
-                "[ \t\n]width=['\"]\\([0-9.eE+-]+\\)\\(pt\\)?['\"]" tag)))
-    (* (string-to-number (match-string 1 tag))
+              (root (latex-to-svg-backend--svg-root data))
+              (width (latex-to-svg-backend--svg-attribute
+                      (substring data (car root) (cdr root)) "width"))
+              ((string-match "\\`\\([0-9.eE+-]+\\)\\(pt\\)?\\'" width)))
+    (* (string-to-number (match-string 1 width))
        (if (match-beginning 2) (latex-to-svg-backend--svg-px-per-pt) 1)
        (let ((scale (image-property image :scale)))
          (if (numberp scale) scale 1)))))
@@ -529,23 +556,26 @@ the ink.  Returns DATA unchanged if there is nothing to pad, or if the
 root tag can't be parsed (defensive: never break rendering over a
 padding request)."
   (if-let* ((box (latex-to-svg-backend--pad-box pad))
-            ((string-match "<svg\\b[^>]*>" data))
-            (beg (match-beginning 0))
-            (end (match-end 0))
-            (tag (match-string 0 data))
-            ((string-match "\\bwidth='\\([0-9.eE+-]+\\)pt'" tag))
-            (w (string-to-number (match-string 1 tag)))
-            ((string-match "\\bheight='\\([0-9.eE+-]+\\)pt'" tag))
-            (h (string-to-number (match-string 1 tag)))
-            ((string-match
-              (concat "\\bviewBox='\\([0-9.eE+-]+\\) \\([0-9.eE+-]+\\) "
-                      "\\([0-9.eE+-]+\\) \\([0-9.eE+-]+\\)'")
-              tag))
-            (vx (string-to-number (match-string 1 tag)))
-            (vy (string-to-number (match-string 2 tag)))
-            (vw (string-to-number (match-string 3 tag)))
-            (vh (string-to-number (match-string 4 tag))))
+            (root (latex-to-svg-backend--svg-root data))
+            (tag (substring data (car root) (cdr root)))
+            (number "\\`[0-9.eE+-]+\\'")
+            (pt (lambda (name)
+                  (when-let* ((value (latex-to-svg-backend--svg-attribute
+                                      tag name))
+                              ((string-suffix-p "pt" value))
+                              ((string-match-p
+                                number (substring value 0 -2))))
+                    (string-to-number value))))
+            (w (funcall pt "width"))
+            (h (funcall pt "height"))
+            (view-box (split-string
+                       (or (latex-to-svg-backend--svg-attribute tag "viewBox")
+                           "")
+                       "[ ,]+" t))
+            ((= (length view-box) 4))
+            ((seq-every-p (lambda (v) (string-match-p number v)) view-box)))
       (pcase-let* ((`(,top ,right ,bottom ,left) box)
+                   (`(,vx ,vy ,vw ,vh) (mapcar #'string-to-number view-box))
                    (nx (- vx left)) (ny (- vy top))
                    (nw (+ vw left right)) (nh (+ vh top bottom))
                    (new-tag tag)
@@ -553,16 +583,14 @@ padding request)."
                              (format "<rect x='%s' y='%s' width='%s' height='%s' fill='%s'/>"
                                      nx ny nw nh background)
                            "")))
-        (setq new-tag (replace-regexp-in-string
-                       "\\bwidth='[0-9.eE+-]+pt'"
-                       (format "width='%spt'" (+ w left right)) new-tag nil t)
-              new-tag (replace-regexp-in-string
-                       "\\bheight='[0-9.eE+-]+pt'"
-                       (format "height='%spt'" (+ h top bottom)) new-tag nil t)
-              new-tag (replace-regexp-in-string
-                       "\\bviewBox='[^']*'"
-                       (format "viewBox='%s %s %s %s'" nx ny nw nh) new-tag nil t))
-        (concat (substring data 0 beg) new-tag rect (substring data end)))
+        (setq new-tag (latex-to-svg-backend--svg-set-attribute
+                       new-tag "width" (format "%spt" (+ w left right)))
+              new-tag (latex-to-svg-backend--svg-set-attribute
+                       new-tag "height" (format "%spt" (+ h top bottom)))
+              new-tag (latex-to-svg-backend--svg-set-attribute
+                       new-tag "viewBox" (format "%s %s %s %s" nx ny nw nh)))
+        (concat (substring data 0 (car root)) new-tag rect
+                (substring data (cdr root))))
     data))
 
 (defun latex-to-svg-backend--load-svg-image (file &optional scale color background padding)
@@ -665,13 +693,6 @@ should defer to display time rather than size against a guess."
                   "cache entry collected while rendering" err 'buffer)))))))))
 
 ;;;; Crop to the ink
-
-(defun latex-to-svg-backend--svg-attribute (tag name)
-  "Return the value of attribute NAME in the SVG start TAG, or nil."
-  (when (string-match (concat "[[:space:]]" (regexp-quote name)
-                              "=\"\\([^\"]*\\)\"")
-                      tag)
-    (match-string 1 tag)))
 
 (defun latex-to-svg-backend--transform-point (matrix x y)
   "Return the point X Y mapped through MATRIX, as (X Y).
@@ -787,14 +808,15 @@ default ink in; it becomes `currentColor', as dvisvgm's `--currentcolor'
 does for the LaTeX engine.  The root element is rewritten with the
 viewport around the ink (see `latex-to-svg-backend--ink-box') and in
 the form dvisvgm writes it -- width and height in pt, values in single
-quotes -- which is the form `latex-to-svg-backend--pad-svg' reads.  One
+quotes.  `latex-to-svg-backend--pad-svg' pads only a width and height in
+pt.  One
 SVG unit is one pt, as in the LaTeX engine's SVGs.  Nil when SVG has
 no root element."
-  (when (string-match "<svg\\b[^>]*>" svg)
-    (let* ((root-beg (match-beginning 0))
-           (root-end (match-end 0))
+  (when-let* ((root (latex-to-svg-backend--svg-root svg)))
+    (let* ((root-beg (car root))
+           (root-end (cdr root))
            (view-box (latex-to-svg-backend--svg-attribute
-                      (match-string 0 svg) "viewBox"))
+                      (substring svg root-beg root-end) "viewBox"))
            (box (or (latex-to-svg-backend--ink-box svg)
                     ;; Nothing drawn (`\,' alone, say): keep the viewport.
                     (pcase-let ((`(,x ,y ,w ,h)

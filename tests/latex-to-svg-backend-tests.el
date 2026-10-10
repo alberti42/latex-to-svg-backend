@@ -353,6 +353,24 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
       (should (string-match-p "height='14pt'" left))
       (should (string-match-p "viewBox='-75 -70 42 14'" left)))))
 
+(ert-deftest latex-to-svg-backend-svg-attribute-reads-either-quote ()
+  ;; dvisvgm writes single quotes, svg.el double ones; `stroke-width' is
+  ;; not `width'.  Setting an attribute keeps its quotes.
+  (let ((single "<svg stroke-width='9' width='36pt' viewBox='0 0 36 14'>")
+        (double "<svg width=\"40\" height=\"20\">"))
+    (should (equal (latex-to-svg-backend--svg-attribute single "width") "36pt"))
+    (should (equal (latex-to-svg-backend--svg-attribute double "width") "40"))
+    (should-not (latex-to-svg-backend--svg-attribute double "viewBox"))
+    (should (equal (latex-to-svg-backend--svg-set-attribute single "width" "42pt")
+                   "<svg stroke-width='9' width='42pt' viewBox='0 0 36 14'>"))
+    (should (equal (latex-to-svg-backend--svg-set-attribute double "height" "8")
+                   "<svg width=\"40\" height=\"8\">"))
+    (should (equal (latex-to-svg-backend--svg-set-attribute double "viewBox" "x")
+                   double)))
+  (should (equal (latex-to-svg-backend--svg-root "<?xml?>\n<svg a='1'><g/></svg>")
+                 '(8 . 19)))
+  (should-not (latex-to-svg-backend--svg-root "<g/>")))
+
 (ert-deftest latex-to-svg-backend-image-cache-key-includes-padding ()
   ;; Padding is its own cache dimension, so a padded box coexists with an
   ;; unpadded one of the same equation / size / colors -- and two paddings
