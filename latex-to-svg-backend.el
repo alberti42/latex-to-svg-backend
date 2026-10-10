@@ -105,8 +105,9 @@
 ;;
 ;; Helpers a front-end typically needs for its refresh policy:
 ;; `latex-to-svg-backend-available-p', `latex-to-svg-backend-appearance',
-;; `latex-to-svg-backend-display-scale', and
-;; `latex-to-svg-backend-foreground-color'.
+;; `latex-to-svg-backend-display-scale',
+;; `latex-to-svg-backend-foreground-color', and
+;; `latex-to-svg-backend-image-width'.
 
 ;;; Code:
 

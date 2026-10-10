@@ -459,6 +459,26 @@ independent, so it can be compiled now and sized later with no recompile."
     (/ (* target latex-to-svg-backend-font-scale (or rescale-by 1.0))
        (* 10.0 (latex-to-svg-backend--svg-px-per-pt)))))
 
+(defun latex-to-svg-backend-image-width (image)
+  "Return the width in pixels at which IMAGE is displayed, or nil.
+IMAGE is an image this backend returned.  A typeset equation's SVG
+gives its width in pt, each displayed at `latex-to-svg-backend-svg-dpi'
+/ 72 pixels; a placeholder's gives it in pixels.  Either is multiplied
+by the image's `:scale'.  Computed, not measured, for the reason
+`latex-to-svg-backend-svg-dpi' gives.  Nil when IMAGE is not an image
+or holds no SVG width."
+  (when-let* (((eq (car-safe image) 'image))
+              (data (image-property image :data))
+              ((stringp data))
+              ((string-match "<svg\\b[^>]*>" data))
+              (tag (match-string 0 data))
+              ((string-match
+                "[ \t\n]width=['\"]\\([0-9.eE+-]+\\)\\(pt\\)?['\"]" tag)))
+    (* (string-to-number (match-string 1 tag))
+       (if (match-beginning 2) (latex-to-svg-backend--svg-px-per-pt) 1)
+       (let ((scale (image-property image :scale)))
+         (if (numberp scale) scale 1)))))
+
 ;;;; Image build
 
 (defun latex-to-svg-backend--pad-box (padding)

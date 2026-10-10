@@ -204,6 +204,7 @@ Helpers a front-end typically needs for its refresh policy:
 | `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change; takes an optional `font-height` so it matches the render |
 | `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font; takes an optional `font-height`, and returns `nil` when no height is known (defer) |
 | `latex-to-svg-backend-foreground-color` | current tint color (`#rrggbb`) |
+| `latex-to-svg-backend-image-width` | the width in pixels at which an image the backend returned is displayed, computed from its SVG width and `:scale` (pt at `latex-to-svg-backend-svg-dpi` / 72 pixels), or `nil` |
 | `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache, and the way to retry a failed compile; an optional second argument names the engine, as for `:engine` |
 | `latex-to-svg-backend-metadata` | read back compile metadata for a LaTeX body (see below), on cache hit or miss; an optional second argument names the engine |
 | `latex-to-svg-backend-engine-used` | `(latex-to-svg-backend-engine-used LATEX ENGINE FALLBACK)`: the engine whose picture a request with those arguments resolves to — `ENGINE`, `FALLBACK` when `ENGINE` failed, or `nil` when neither has a picture |

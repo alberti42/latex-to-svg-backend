@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `latex-to-svg-backend-image-width`: the width in pixels at which an
+  image the backend returned is displayed, computed from its SVG width
+  and `:scale`, as the image is sized: a pt is
+  `latex-to-svg-backend-svg-dpi` / 72 pixels. A front-end gives it to
+  code that lays out the text around the image, such as pretty-tables.
+
 ## [0.12.1] - 2026-10-09
 
 ### Fixed

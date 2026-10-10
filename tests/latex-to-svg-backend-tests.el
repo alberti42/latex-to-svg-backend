@@ -142,6 +142,27 @@
   (let ((latex-to-svg-backend-svg-dpi 144.0))
     (should (equal (latex-to-svg-backend--svg-px-per-pt) 2.0))))
 
+(ert-deftest latex-to-svg-backend-image-width-from-the-svg ()
+  ;; The displayed width is computed from the root `<svg>' width and the
+  ;; image's `:scale': pt at `latex-to-svg-backend-svg-dpi' / 72 pixels,
+  ;; or pixels as svg.el writes them for the placeholder.
+  (let ((latex-to-svg-backend-svg-dpi 144.0))   ; dpi/72 = 2.0
+    (should (equal (latex-to-svg-backend-image-width
+                    (list 'image :type 'svg :scale 1.5 :data
+                          "<svg xmlns='http://www.w3.org/2000/svg' \
+width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
+                   30.0))
+    (should (equal (latex-to-svg-backend-image-width
+                    (list 'image :type 'svg :scale 1.0 :data
+                          "<svg width=\"40\" height=\"20\"><rect stroke-width=\"1\"/></svg>"))
+                   40.0))
+    ;; No SVG width: nil.
+    (should-not (latex-to-svg-backend-image-width
+                 (list 'image :type 'svg :data "<svg viewBox='0 0 1 1'/>")))
+    (should-not (latex-to-svg-backend-image-width
+                 (list 'image :type 'svg :file "x.svg")))
+    (should-not (latex-to-svg-backend-image-width 'not-an-image))))
+
 (ert-deftest latex-to-svg-backend-display-scale-matches-font ()
   ;; The display scale maps the LaTeX 10pt body font onto the buffer font
   ;; height: scale = target * font-scale / (10 * dpi/72).  Pass FONT-HEIGHT
