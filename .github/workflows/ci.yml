@@ -42,13 +42,16 @@ jobs:
       - name: Report version
         run: emacs --version | head -1
 
-      # `-L .' lets each file `require' the others.
+      # `-L .' lets each file `require' the others.  The test file is
+      # compiled too: a macro used before its definition compiles as a
+      # function call, which loading the source does not catch.
       - name: Byte-compile, warnings as errors
         run: |
           emacs -Q -batch -L . --eval '(setq byte-compile-error-on-warn t)' \
             -f batch-byte-compile latex-to-svg-backend-core.el \
             latex-to-svg-backend-latex.el latex-to-svg-backend-ratex.el \
-            latex-to-svg-backend-texres.el latex-to-svg-backend.el
+            latex-to-svg-backend-texres.el latex-to-svg-backend.el \
+            tests/latex-to-svg-backend-tests.el
 
       # Docstring conventions, exiting non-zero on any finding: `checkdoc-file'
       # only prints.  Both flags are set rather than left at their defaults,

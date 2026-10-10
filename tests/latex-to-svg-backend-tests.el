@@ -2817,6 +2817,31 @@ and one in a formula's own black.")
         (should (string-search (latex-to-svg-backend--cache-key doc 'ratex)
                                (buffer-name (plist-get plist :buffer))))))))
 
+(defmacro latex-to-svg-backend-tests--with-format-cache (&rest body)
+  "Run BODY with an empty cache, precompilation on, and a fake LaTeX binary.
+The binary is bound to `binary'; the dump is stubbed to write the
+`.fmt' and its stamp, and counts itself in `builds'."
+  (declare (indent 0) (debug t))
+  `(let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-stamp" t))
+          (latex-to-svg-backend-precompile t)
+          (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
+          (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal))
+          (binary (make-temp-file "l2s-bin"))
+          (builds 0))
+     (unwind-protect
+         (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
+                    (lambda (&optional _program) binary))
+                   ((symbol-function 'latex-to-svg-backend--build-format)
+                    (lambda (fkey _preamble &optional _program)
+                      (cl-incf builds)
+                      (let ((f (latex-to-svg-backend--format-file fkey)))
+                        (with-temp-file f (insert "fmt"))
+                        (latex-to-svg-backend--write-format-stamp f binary)
+                        f))))
+           ,@body)
+       (delete-file binary)
+       (delete-directory latex-to-svg-backend-cache-directory t))))
+
 (ert-deftest latex-to-svg-backend-invalidate-format-drops-the-buffers-fmt ()
   ;; The buffer's `.fmt' file goes, with its stamp, its freshness check and
   ;; its blocklist entry; other preambles' `.fmt' files stay.
@@ -2879,31 +2904,6 @@ and one in a formula's own black.")
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 ;;;; Stamps and collection of the `.fmt' files
-
-(defmacro latex-to-svg-backend-tests--with-format-cache (&rest body)
-  "Run BODY with an empty cache, precompilation on, and a fake LaTeX binary.
-The binary is bound to `binary'; the dump is stubbed to write the
-`.fmt' and its stamp, and counts itself in `builds'."
-  (declare (indent 0) (debug t))
-  `(let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-stamp" t))
-          (latex-to-svg-backend-precompile t)
-          (latex-to-svg-backend--format-checked (make-hash-table :test 'equal))
-          (latex-to-svg-backend--format-blocklist (make-hash-table :test 'equal))
-          (binary (make-temp-file "l2s-bin"))
-          (builds 0))
-     (unwind-protect
-         (cl-letf (((symbol-function 'latex-to-svg-backend--latex-binary)
-                    (lambda (&optional _program) binary))
-                   ((symbol-function 'latex-to-svg-backend--build-format)
-                    (lambda (fkey _preamble &optional _program)
-                      (cl-incf builds)
-                      (let ((f (latex-to-svg-backend--format-file fkey)))
-                        (with-temp-file f (insert "fmt"))
-                        (latex-to-svg-backend--write-format-stamp f binary)
-                        f))))
-           ,@body)
-       (delete-file binary)
-       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 (ert-deftest latex-to-svg-backend-format-stamp-decides-freshness ()
   ;; A `.fmt' file is reused in a new session while its stamp names the
