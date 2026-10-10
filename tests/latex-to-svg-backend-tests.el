@@ -163,6 +163,26 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
                  (list 'image :type 'svg :file "x.svg")))
     (should-not (latex-to-svg-backend-image-width 'not-an-image))))
 
+(ert-deftest latex-to-svg-backend-image-width-includes-padding ()
+  ;; `--load-svg-image' pads the SVG before `create-image', so the width
+  ;; includes the left and right padding.  Needs an Emacs built with
+  ;; librsvg, as the `--load-svg-image' tests below.
+  (skip-unless (image-type-available-p 'svg))
+  (let ((tmp (make-temp-file "l2s-width-pad" nil ".svg"))
+        (latex-to-svg-backend-svg-dpi 144.0))   ; dpi/72 = 2.0
+    (unwind-protect
+        (progn
+          (with-temp-file tmp
+            (insert "<svg xmlns='http://www.w3.org/2000/svg' "
+                    "width='10pt' height='5pt' viewBox='0 0 10 5'>"
+                    "<path fill='currentColor' d='M0 0h1v1z'/></svg>"))
+          ;; (10 + 2 right + 4 left) pt * 2.0 px/pt * 1.5 = 48 px.
+          (should (equal (latex-to-svg-backend-image-width
+                          (latex-to-svg-backend--load-svg-image
+                           tmp 1.5 "#000" nil '(1 2 3 4)))
+                         48.0)))
+      (delete-file tmp))))
+
 (ert-deftest latex-to-svg-backend-display-scale-matches-font ()
   ;; The display scale maps the LaTeX 10pt body font onto the buffer font
   ;; height: scale = target * font-scale / (10 * dpi/72).  Pass FONT-HEIGHT
