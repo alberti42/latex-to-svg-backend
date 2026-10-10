@@ -1,6 +1,6 @@
-# Byte-compilation, checkdoc and the ERT suite, on every push to main and
-# every pull request.  The suite needs neither a TeX toolchain nor a
-# graphical display, so the matrix job runs it as it stands; the
+# Byte-compilation, checkdoc and the ERT suite, on every push to main or
+# develop and every pull request.  The suite needs neither a TeX toolchain
+# nor a graphical display, so the matrix job runs it as it stands; the
 # end-to-end tests skip there and get a job of their own below.
 #
 # The matrix is the declared floor (29.1, the `Package-Requires' of
@@ -14,7 +14,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 concurrency:
