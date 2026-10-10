@@ -248,10 +248,12 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
   (when-let* ((window (get-buffer-window buffer t))
               ((display-graphic-p (window-frame window))))
     (with-selected-window window
-      (list :color (apply #'color-rgb-to-hex
-                          (append (color-name-to-rgb
-                                   (face-foreground 'default nil t))
-                                  '(2)))
+      (list :color (apply #'format "#%02x%02x%02x"
+                          ;; Round the 16-bit values: `color-rgb-to-hex'
+                          ;; truncates, one step low just under a whole one.
+                          (mapcar (lambda (v) (round (* v 255) 65535))
+                                  (color-values
+                                   (face-foreground 'default nil t))))
             :font-height (default-font-height)))))
 
 (defun my-place (buffer beg end latex)   ; LATEX is valid body LaTeX
