@@ -14,7 +14,7 @@ A **buffer-agnostic** Emacs library that turns one LaTeX math string into one SV
 Equations are compiled once and then recolored and rescaled **without recompiling** — the two things that are expensive if you bake color/size into the render:
 
 - **Each equation compiles once.** The cache file is named after the equation itself (the SHA-1 of the LaTeX, the preamble and the style), so identical input always finds its own file and the cache is shared across every front-end and buffer.
-- **Color-independent SVG.** The default ink is the literal token `currentColor` in the SVG (`dvisvgm --currentcolor` writes it; for RaTeX the backend replaces a marker color with it), substituted with the buffer foreground at display time. A theme switch re-tints from cache — no recompile. The image background is transparent, so it always matches the buffer.
+- **Color-independent SVG.** The default ink is the literal token `currentColor` in the SVG (`dvisvgm --currentcolor` writes it; for RaTeX the backend replaces a marker color with it), substituted with the caller's `:color` at display time. A theme switch re-tints from cache — no recompile. The image background is transparent, so it always matches the buffer.
 - **Size-independent SVG.** Both engines compile at a 10pt em, 1 SVG unit = 1pt (`dvisvgm --scale=1`; RaTeX `--font-size 40 --dpr 0.25`), with glyphs as outline paths. At display time, `create-image`'s `:scale` maps the 10pt em onto the buffer font height, so equations track the font — also here no recompile.
 - **In-memory image cache.** On top of the on-disk SVG cache, each ready-to-display image (the SVG already tinted and scaled for the current buffer) is memoized for the session, keyed by content + color + scale. Re-showing an equation you've already displayed — revisiting a buffer, scrolling back, a redisplay — is then an instant hash lookup, with no disk read and no recompile. Sizes and colors coexist as separate entries, so a font or theme change just adds one.
 
@@ -174,13 +174,13 @@ In a running Emacs, load `dev/latex-to-svg-backend-benchmark.el` and call `M-x l
 
 `LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the backend is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
 
-Returns an image now when one can be produced synchronously (cache / on-disk SVG / placeholder), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile. At most `latex-to-svg-backend-jobs` compiles run at once; further compiles wait in a queue and start, oldest first, as running ones end.
+Returns an image now when one can be produced synchronously (cache / on-disk SVG), else `nil` after scheduling an asynchronous compile; `CALLBACK` (a zero-argument function) is invoked once the SVG is ready, so the caller can re-query (`latex-to-svg-backend` again → now returns the image) and place it. Concurrent requests for the same equation are coalesced onto a single compile. At most `latex-to-svg-backend-jobs` compiles run at once; further compiles wait in a queue and start, oldest first, as running ones end.
 
 `ENGINE` is `latex` (the default, also `nil`), `ratex` or `texres`; see [Engines](#engines). Any other value signals an error. `FALLBACK` names an engine that typesets `LATEX` when `ENGINE` rejects it, and `QUIET` drops the warning a failed compile gives; see [Failed compiles](#failed-compiles-and-the-fallback-engine).
 
 `RESCALE-BY` (default `1.0`) multiplies the display size of this one call on top of `latex-to-svg-backend-font-scale`. The backend has no inline/display awareness, so a front-end that wants display equations a touch larger than inline passes, say, `:rescale-by 1.1` for display and nothing for inline. It is a display-time scale only — same on-disk SVG, no recompile — and folds into the in-memory image cache key, so both sizes coexist. `METADATA` is documented under [Compile metadata](#compile-metadata-eld-sidecar) below.
 
-`COLOR` and `BACKGROUND` override, for this one call, the tint and the box color (both color strings — `#rrggbb` or any name `color-name-to-rgb` understands). `COLOR` defaults to the buffer foreground (`latex-to-svg-backend-foreground-color`), which tracks the theme; `BACKGROUND` defaults to `nil` = transparent, so equations blend into the buffer. `PADDING` grows the `BACKGROUND` box beyond the ink — the SVG viewport is enlarged and a filled `<rect>` baked in — and scales with the equation; `nil` / `0` crops the box to the ink. It is either a number of pt, applied to all four sides, or a list of one to four numbers read in **CSS order**:
+`COLOR` is the tint and `BACKGROUND` the box color, both `#rrggbb` strings. `COLOR` is required whenever `FONT-HEIGHT` is given; `BACKGROUND` defaults to `nil` = transparent, so equations blend into the buffer. The backend resolves no color names and reads no faces: a name resolves on a frame, and only the front-end knows which frame shows its buffer, so it resolves the color there. A `COLOR` or `BACKGROUND` in any other form signals an error. `PADDING` grows the `BACKGROUND` box beyond the ink — the SVG viewport is enlarged and a filled `<rect>` baked in — and scales with the equation; `nil` / `0` crops the box to the ink. It is either a number of pt, applied to all four sides, or a list of one to four numbers read in **CSS order**:
 
 | Spec | Sides |
 | --- | --- |
@@ -189,11 +189,11 @@ Returns an image now when one can be produced synchronously (cache / on-disk SVG
 | `(2 6 4)` | top, horizontal, bottom |
 | `(2 6 4 8)` | top, right, bottom, left |
 
-So a left gutter and nothing else is `:padding '(0 0 0 6)`. Each dimension grows by the sum of its two sides and the origin shifts by the left/top ones, so the ink stays put relative to the sides that were not padded. A malformed spec (wrong length, a non-number, a negative side) signals an error rather than silently rendering an unpadded box. Like `RESCALE-BY` they apply at display time only — same on-disk SVG, no recompile — and fold into the image cache key so variants coexist. The backend has no tint policy of its own beyond following the buffer face: a front-end owns any user-facing “fixed color” / “boxed equation” preference and passes it here.
+So a left gutter and nothing else is `:padding '(0 0 0 6)`. Each dimension grows by the sum of its two sides and the origin shifts by the left/top ones, so the ink stays put relative to the sides that were not padded. A malformed spec (wrong length, a non-number, a negative side) signals an error rather than silently rendering an unpadded box. Like `RESCALE-BY` they apply at display time only — same on-disk SVG, no recompile — and fold into the image cache key so variants coexist. A front-end owns any user-facing “fixed color” / “boxed equation” preference and passes it here.
 
-`FONT-HEIGHT` (pixels) is the buffer font height to size against. A front-end that knows the buffer's actual display frame measures `default-font-height` there and passes it, so sizing never depends on which frame happens to be selected (e.g. an async callback while a TTY/daemon frame is current). When omitted, the selected frame is measured if it is graphical. When **no** height is known (omitted *and* the selected frame is non-graphical — a background/daemon render of a buffer shown in no window), the backend still ensures the size-independent SVG is compiled and cached, but returns `nil` rather than sizing against a guess — the front-end re-queries once the buffer is displayed (its display hook already does this for theme/font changes) and the image is built then, from cache, with no recompile. The `latex` → `dvisvgm` **compile** never needs a frame; only building the display image does.
+`FONT-HEIGHT` (pixels) is the buffer font height to size against. The front-end measures `default-font-height` on the frame that shows the buffer and passes it. `nil` means the buffer is shown nowhere: the backend still ensures the size-independent SVG is compiled and cached, but returns `nil` and measures nothing. The front-end re-queries once the buffer is shown, and the image is built then, from cache, with no recompile. The `latex` → `dvisvgm` **compile** never needs a frame; only building the display image does.
 
-The image is tinted to the current buffer foreground and scaled to the buffer font at build time, so call it within the target buffer.
+Call it within the target buffer: the engines read their options there, so a buffer-local value applies to that buffer's equations.
 
 Helpers a front-end typically needs for its refresh policy:
 
@@ -201,9 +201,7 @@ Helpers a front-end typically needs for its refresh policy:
 | --- | --- |
 | `latex-to-svg-backend-available-p` | SVG build support + graphical (or non-graphic opt-in) |
 | `latex-to-svg-backend-tools-available-p` | the programs of an engine on `exec-path`: `latex` + `dvisvgm`, `render-svg` with the argument `ratex`, or `texres` + `pdftocairo` with `texres`. A request does not call it: it runs the programs, and a missing one is warned about |
-| `latex-to-svg-backend-appearance` | `(FOREGROUND BACKGROUND FONT-HEIGHT)` signature to detect color/size change; takes an optional `font-height` so it matches the render |
-| `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font; takes an optional `font-height`, and returns `nil` when no height is known (defer) |
-| `latex-to-svg-backend-foreground-color` | current tint color (`#rrggbb`) |
+| `latex-to-svg-backend-display-scale` | the `:scale` mapping the equation to the buffer font of height `font-height`, or `nil` when `font-height` is `nil` |
 | `latex-to-svg-backend-image-width` | the width in pixels at which an image the backend returned is displayed, computed from its SVG width and `:scale` (pt at `latex-to-svg-backend-svg-dpi` / 72 pixels), or `nil` |
 | `latex-to-svg-backend-invalidate` | forget a cached render (delete its on-disk SVG + in-memory images, and its `.eld` sidecar) so the next call recompiles — an escape hatch for a stale/corrupt cache, and the way to retry a failed compile; an optional second argument names the engine, as for `:engine` |
 | `latex-to-svg-backend-metadata` | read back compile metadata for a LaTeX body (see below), on cache hit or miss; an optional second argument names the engine |
@@ -245,15 +243,30 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 ### Sketch of a front-end
 
 ```elisp
+(defun my-appearance (buffer)
+  "Return the :color and :font-height arguments for BUFFER, or nil."
+  (when-let* ((window (get-buffer-window buffer t))
+              ((display-graphic-p (window-frame window))))
+    (with-selected-window window
+      (list :color (apply #'color-rgb-to-hex
+                          (append (color-name-to-rgb
+                                   (face-foreground 'default nil t))
+                                  '(2)))
+            :font-height (default-font-height)))))
+
 (defun my-place (buffer beg end latex)   ; LATEX is valid body LaTeX
   (with-current-buffer buffer
-    (if-let ((img (latex-to-svg-backend latex)))
-        (my-overlay buffer beg end img)          ; cached / placeholder
+    (if-let* ((img (apply #'latex-to-svg-backend latex (my-appearance buffer))))
+        (my-overlay buffer beg end img)          ; cached
       (let ((s (copy-marker beg)) (e (copy-marker end)))
-        (latex-to-svg-backend latex
-          :callback (lambda ()
-                      (with-current-buffer buffer
-                        (my-overlay buffer s e (latex-to-svg-backend latex)))))))))
+        (apply #'latex-to-svg-backend latex
+               :callback
+               (lambda ()
+                 (with-current-buffer buffer
+                   (when-let* ((img (apply #'latex-to-svg-backend latex
+                                           (my-appearance buffer))))
+                     (my-overlay buffer s e img))))
+               (my-appearance buffer))))))
 ```
 
 ## Customization
@@ -266,10 +279,10 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 | `-cache-max-age` | `-dvisvgm-program` | `-ratex-macros` |
 | `-gc-interval` | `-preamble` | |
 | `-font-scale` | `-appended-preamble` | |
-| `-use-placeholder` | `-preamble-not-precompiled` | |
-| `-jobs` | `-line-width` | |
-| `-render-on-non-graphic` | `-metadata-prefix` | |
-| `-svg-dpi` | `-precompile` | |
+| `-jobs` | `-preamble-not-precompiled` | |
+| `-render-on-non-graphic` | `-line-width` | |
+| `-svg-dpi` | `-metadata-prefix` | |
+| | `-precompile` | |
 | `M-x …-gc`, `…-clear-cache`, `…-invalidate` | `M-x …-flush-format`, `…-invalidate-format` | |
 
 The texres engine has two options of its own, `-texres-program` and `-pdftocairo-program`, in the subgroup `latex-to-svg-backend-texres`; `-latex-program` and `-dvisvgm-program` are the LaTeX engine's only.
@@ -290,7 +303,6 @@ The functions under [API](#api) work with all three; `latex-to-svg-backend-metad
 | `latex-to-svg-backend-cache-max-age` | `90` | GC deletes equations untouched for this many days (`nil` = no age limit) |
 | `latex-to-svg-backend-gc-interval` | `1` | minimum days between automatic GC runs (`nil` = no automatic GC) |
 | `latex-to-svg-backend-font-scale` | `1.0` | equation size relative to the buffer font (1.0 = match) |
-| `latex-to-svg-backend-use-placeholder` | `nil` | force the raw-LaTeX placeholder instead of compiling |
 | `latex-to-svg-backend-render-on-non-graphic` | `nil` | allow rendering on a non-graphical frame |
 | `latex-to-svg-backend-svg-dpi` | `96.0` | points→pixels constant for sizing; rarely needs changing |
 | `latex-to-svg-backend-jobs` | `nil` | maximum number of compiles to run at once (`nil` = the number of processors); further compiles wait in a queue |

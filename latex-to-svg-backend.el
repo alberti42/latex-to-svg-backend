@@ -52,7 +52,7 @@
 ;;
 ;;   * The on-disk SVG is COLOR-INDEPENDENT: dvisvgm `--currentcolor' emits
 ;;     the default ink as the literal token `currentColor', which is
-;;     substituted with the buffer foreground at display time.  A theme
+;;     substituted with the caller's `:color' at display time.  A theme
 ;;     switch therefore re-tints from cache with no recompile.  The image
 ;;     background is transparent, so it always matches the buffer.
 ;;
@@ -87,7 +87,7 @@
 ;; The backend is deliberately unaware of that distinction.
 ;;
 ;; Returns an image now when one can be produced synchronously (cache /
-;; on-disk SVG / placeholder), else nil after scheduling an asynchronous
+;; on-disk SVG), else nil after scheduling an asynchronous
 ;; compile; CALLBACK (a zero-argument function) is invoked once the SVG is
 ;; ready, so the caller can re-query and place the image.  Concurrent
 ;; requests for the same equation are coalesced onto a single compile.
@@ -96,17 +96,16 @@
 ;; `:fallback latex' typesets it with LaTeX instead, and
 ;; `latex-to-svg-backend-engine-used' says which engine drew a picture.
 ;;
-;; The optional `:color'/`:background'/`:padding' keys override the
-;; display-time tint, an optional box color behind the equation, and padding
-;; that grows that box beyond the ink -- one number for all four sides, or a
-;; list of one to four numbers in CSS order, so a left-only gutter is
-;; (0 0 0 6) (all apply post-compile, no recompile); a front-end owns the
-;; user-facing preference and passes it through.
+;; The backend reads no faces and no frames.  The caller passes the
+;; tint as `:color' and the buffer font height as `:font-height', both
+;; read on the frame that shows its buffer; `:background' and `:padding'
+;; add a box behind the equation and grow it beyond the ink -- one number
+;; for all four sides, or a list of one to four numbers in CSS order, so a
+;; left-only gutter is (0 0 0 6).  All apply post-compile, no recompile.
 ;;
 ;; Helpers a front-end typically needs for its refresh policy:
-;; `latex-to-svg-backend-available-p', `latex-to-svg-backend-appearance',
-;; `latex-to-svg-backend-display-scale',
-;; `latex-to-svg-backend-foreground-color', and
+;; `latex-to-svg-backend-available-p',
+;; `latex-to-svg-backend-display-scale', and
 ;; `latex-to-svg-backend-image-width'.
 
 ;;; Code:
@@ -400,12 +399,13 @@ display and nothing for inline.  It is applied at display time only --
 same on-disk SVG, no recompile — and folds into the in-memory image cache
 key, so the two sizes coexist.
 
-COLOR overrides the tint for this one call (a color string — `#rrggbb'
-or any name `color-name-to-rgb' understands); nil (the default) tints
-to the buffer foreground (`latex-to-svg-backend-foreground-color'), which
-tracks the theme.  BACKGROUND paints a box color behind the otherwise
-transparent equation (a color string); nil (the default) keeps it
-transparent so it blends into the buffer.  PADDING grows that box
+COLOR is the tint, a `#rrggbb' string; it is required whenever
+FONT-HEIGHT is given.  The backend resolves no color names and reads no
+faces: the front-end resolves the color on the frame that shows its
+buffer.  BACKGROUND paints a box color behind the otherwise transparent
+equation (a `#rrggbb' string); nil (the default) keeps it transparent
+so it blends into the buffer.  A COLOR or BACKGROUND in any other form
+signals an error.  PADDING grows that box
 beyond the ink (it scales with the equation): a number of pt applies to
 all four sides, and a list of one to four numbers is read in CSS order
 -- (ALL), (VERTICAL HORIZONTAL), (TOP HORIZONTAL BOTTOM), (TOP RIGHT
@@ -413,21 +413,15 @@ BOTTOM LEFT) -- so (0 0 0 6) is a left gutter and nothing else.  Nil
 / 0 (the default) crops the box to the ink.  All apply
 at display time only -- same on-disk SVG, no recompile -- and fold
 into the in-memory image cache key, so tinted / boxed / padded
-variants coexist.  The backend has no tint policy of its own beyond
-following the buffer face; a front-end owns the user preference and
-passes it here.
+variants coexist.
 
-FONT-HEIGHT (pixels) is the buffer font height to size against.  A
-front-end that knows the buffer's actual display frame measures
-`default-font-height' there and passes it, so sizing never depends on
-which frame is selected.  When omitted, the selected frame is measured
-if graphical.  When no height is known (omitted and the selected frame
-is non-graphical -- e.g. an async/daemon render of a buffer shown
-nowhere), the backend still ensures the (size-independent) SVG is
-compiled and cached, but returns nil instead of sizing against a guess:
-the caller re-queries once the buffer is displayed (where a trustworthy
-height exists) and the image is built then, from cache, with no
-recompile.
+FONT-HEIGHT (pixels) is the buffer font height to size against.  The
+front-end measures `default-font-height' on the frame that shows the
+buffer and passes it.  Nil means the buffer is shown nowhere: the
+backend still ensures the (size-independent) SVG is compiled and
+cached, but returns nil and measures nothing.  The caller re-queries
+once the buffer is shown, and the image is built then, from cache, with
+no recompile.
 
 LATEX is placed *verbatim* in the LaTeX document body, so it must be
 valid there: pass math with its delimiters (`$x$', `\\(x\\)', `\\=\\[x\\=\\]')
@@ -439,8 +433,6 @@ otherwise (see `latex-to-svg-backend--ratex-delimiters').
 
 Returns immediately with:
 
-  * the placeholder panel image, when `latex-to-svg-backend-use-placeholder'
-    is set (see `latex-to-svg-backend--placeholder');
   * the cached / on-disk equation image when it is ready, or FALLBACK's
     when ENGINE failed;
   * nil when equations aren't renderable (see
@@ -453,64 +445,62 @@ is invoked once, when the SVG is ready, so the caller can re-query
 \(call `latex-to-svg-backend' again, which now returns the image) and place
 it.  Concurrent requests for the same equation share one compile.
 
-The image is tinted to the current buffer foreground and scaled to
-the buffer font at build time, so call within the target buffer.  The
-engines also read their options there (see
+Call within the target buffer: the engines read their options there (see
 `latex-to-svg-backend--inputs'), so a buffer-local value, from a
 `.dir-locals.el' say, applies to that buffer's equations."
   (setq engine (latex-to-svg-backend--engine engine)
         fallback (and fallback (latex-to-svg-backend--engine fallback)))
   (when (eq fallback engine)
     (setq fallback nil))
+  (latex-to-svg-backend--hex-color color :color)
+  (latex-to-svg-backend--hex-color background :background)
+  (when (and font-height (null color))
+    (error "Missing :color: required with :font-height"))
   (when (latex-to-svg-backend-available-p)
-    (cond
-     (latex-to-svg-backend-use-placeholder
-      (latex-to-svg-backend--placeholder latex))
-     (t
-      (let* ((inputs (latex-to-svg-backend--inputs))
-             (key (latex-to-svg-backend--cache-key latex engine inputs))
-             (compiled (file-exists-p (latex-to-svg-backend--svg-file key)))
-             (image (and compiled
-                         (latex-to-svg-backend--cached-image
-                          key rescale-by color background padding font-height))))
+    (let* ((inputs (latex-to-svg-backend--inputs))
+           (key (latex-to-svg-backend--cache-key latex engine inputs))
+           (compiled (file-exists-p (latex-to-svg-backend--svg-file key)))
+           (image (and compiled
+                       (latex-to-svg-backend--cached-image
+                        key rescale-by color background padding font-height))))
+      (cond
+       ;; SVG on disk and a font height: return the display image.
+       (image)
+       ;; Compiled, but no font height (buffer shown nowhere): defer.
+       ;; The caller re-renders when the buffer is displayed.
+       (compiled nil)
+       ;; ENGINE rejected LATEX before: do not compile it again.
+       ((latex-to-svg-backend--failed-p key)
         (cond
-         ;; SVG on disk and a trustworthy size: return the display image.
-         (image)
-         ;; Compiled, but no size context yet (buffer shown nowhere): defer.
-         ;; The caller re-renders when the buffer is displayed.
-         (compiled nil)
-         ;; ENGINE rejected LATEX before: do not compile it again.
-         ((latex-to-svg-backend--failed-p key)
-          (cond
-           ((null fallback)
-            (unless quiet
-              (latex-to-svg-backend--report-failure
-               key latex engine (current-buffer)))
-            nil)
-           (t
-            (let ((image (latex-to-svg-backend
-                          latex :callback callback :metadata metadata
-                          :engine fallback :quiet quiet
-                          :rescale-by rescale-by :color color
-                          :background background :padding padding
-                          :font-height font-height)))
-              (when image
-                (latex-to-svg-backend--note-fallback key engine fallback))
-              image))))
-         ;; Not compiled: ensure it is (eagerly, even with no size context),
-         ;; so it is ready when the buffer is later displayed; CALLBACK fires
-         ;; on completion so the caller re-queries and sizes it then.
-         (t (when callback
-              (latex-to-svg-backend--enqueue
-               key latex
-               (latex-to-svg-backend--waiter
-                callback quiet
-                (and fallback
-                     (lambda (waiter)
-                       (latex-to-svg-backend--fall-back
-                        latex fallback metadata waiter inputs))))
-               metadata engine inputs))
-            nil)))))))
+         ((null fallback)
+          (unless quiet
+            (latex-to-svg-backend--report-failure
+             key latex engine (current-buffer)))
+          nil)
+         (t
+          (let ((image (latex-to-svg-backend
+                        latex :callback callback :metadata metadata
+                        :engine fallback :quiet quiet
+                        :rescale-by rescale-by :color color
+                        :background background :padding padding
+                        :font-height font-height)))
+            (when image
+              (latex-to-svg-backend--note-fallback key engine fallback))
+            image))))
+       ;; Not compiled: ensure it is (eagerly, even with no size context),
+       ;; so it is ready when the buffer is later displayed; CALLBACK fires
+       ;; on completion so the caller re-queries and sizes it then.
+       (t (when callback
+            (latex-to-svg-backend--enqueue
+             key latex
+             (latex-to-svg-backend--waiter
+              callback quiet
+              (and fallback
+                   (lambda (waiter)
+                     (latex-to-svg-backend--fall-back
+                      latex fallback metadata waiter inputs))))
+             metadata engine inputs))
+          nil)))))
 
 ;;;###autoload
 (defun latex-to-svg-backend-invalidate (latex &optional engine)

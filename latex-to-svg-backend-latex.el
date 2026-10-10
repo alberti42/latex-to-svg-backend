@@ -703,7 +703,7 @@ recorded.  NO-FORMAT forces that inline path (it is set on the retry).
 
 No color is baked in: the equation's default ink becomes the literal
 `currentColor', so the SVG is color-independent and is tinted to the
-buffer foreground at display time (`latex-to-svg-backend--load-svg-image').
+caller's `:color' at display time (`latex-to-svg-backend--load-svg-image').
 A theme change therefore re-tints from cache without recompiling."
   (let* ((toolchain (or toolchain (latex-to-svg-backend--latex-toolchain)))
          (program (or (plist-get toolchain :program)

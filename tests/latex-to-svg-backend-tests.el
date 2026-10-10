@@ -128,11 +128,13 @@
 ;;;; Scale
 
 (ert-deftest latex-to-svg-backend-display-scale-nil-when-height-unknown ()
-  ;; With no font height known (batch: non-graphical selected frame, no
-  ;; FONT-HEIGHT passed) the scale is nil, not a guess: the caller defers
-  ;; sizing until the buffer is displayed (the SVG is size-independent).
-  (should (equal (latex-to-svg-backend-display-scale) nil))
-  (should (equal (latex-to-svg-backend-display-scale 1.3) nil)))
+  ;; No FONT-HEIGHT means the buffer is shown nowhere: the scale is nil,
+  ;; whatever RESCALE-BY, and no frame is measured -- not even a graphical
+  ;; selected one.
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'default-font-height) (lambda (&rest _) 20)))
+    (should (equal (latex-to-svg-backend-display-scale) nil))
+    (should (equal (latex-to-svg-backend-display-scale 1.3) nil))))
 
 (ert-deftest latex-to-svg-backend-px-per-pt-is-deterministic ()
   ;; Pixels-per-point is a pure function of `latex-to-svg-backend-svg-dpi' — no
@@ -144,19 +146,17 @@
 
 (ert-deftest latex-to-svg-backend-image-width-from-the-svg ()
   ;; The displayed width is computed from the root `<svg>' width and the
-  ;; image's `:scale': pt at `latex-to-svg-backend-svg-dpi' / 72 pixels,
-  ;; or pixels as svg.el writes them for the placeholder.
+  ;; image's `:scale': pt at `latex-to-svg-backend-svg-dpi' / 72 pixels.
   (let ((latex-to-svg-backend-svg-dpi 144.0))   ; dpi/72 = 2.0
     (should (equal (latex-to-svg-backend-image-width
                     (list 'image :type 'svg :scale 1.5 :data
                           "<svg xmlns='http://www.w3.org/2000/svg' \
 width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
                    30.0))
-    (should (equal (latex-to-svg-backend-image-width
-                    (list 'image :type 'svg :scale 1.0 :data
-                          "<svg width=\"40\" height=\"20\"><rect stroke-width=\"1\"/></svg>"))
-                   40.0))
-    ;; No SVG width: nil.
+    ;; No SVG width in pt: nil.
+    (should-not (latex-to-svg-backend-image-width
+                 (list 'image :type 'svg :scale 1.0 :data
+                       "<svg width=\"40\" height=\"20\"><rect/></svg>")))
     (should-not (latex-to-svg-backend-image-width
                  (list 'image :type 'svg :data "<svg viewBox='0 0 1 1'/>")))
     (should-not (latex-to-svg-backend-image-width
@@ -206,27 +206,30 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
     (let ((base (latex-to-svg-backend-display-scale nil 28)))
       (should (equal (latex-to-svg-backend-display-scale 1.0 28) base))
       (should (< (abs (- (latex-to-svg-backend-display-scale 1.5 28) (* 1.5 base)))
-                 1e-9))))
-  ;; No height known: nil (defer), regardless of RESCALE-BY.
-  (should (equal (latex-to-svg-backend-display-scale) nil))
-  (should (equal (latex-to-svg-backend-display-scale 1.3) nil)))
+                 1e-9)))))
 
-;;;; Appearance
+;;;; Colors
 
-(ert-deftest latex-to-svg-backend-appearance-tracks-color-and-font ()
-  ;; The appearance signature folds in both the colors and the buffer font
-  ;; height, so a lazy refresh detects a font-size change as well as a color
-  ;; change.
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
-            ((symbol-function 'latex-to-svg-backend--svg-color)
-             (lambda (_face attr _fallback)
-               (if (eq attr :foreground) "#111111" "#eeeeee"))))
-    (cl-letf (((symbol-function 'default-font-height) (lambda (&rest _) 20)))
-      (let ((a (latex-to-svg-backend-appearance)))
-        (should (equal a '("#111111" "#eeeeee" 20)))
-        ;; Same colors, larger font => different signature => would refresh.
-        (cl-letf (((symbol-function 'default-font-height) (lambda (&rest _) 28)))
-          (should-not (equal a (latex-to-svg-backend-appearance))))))))
+(ert-deftest latex-to-svg-backend-hex-color-accepts-only-rrggbb ()
+  ;; The backend resolves no color names: a name resolves on a frame, and
+  ;; the backend does not know which one shows the buffer.
+  (should-not (latex-to-svg-backend--hex-color nil :color))
+  (should (equal (latex-to-svg-backend--hex-color "#1a2B3c" :color) "#1a2B3c"))
+  (dolist (color '("grey50" "#fff" "#ffffffffffff" "#12345g" "" red))
+    (should-error (latex-to-svg-backend--hex-color color :color))))
+
+(ert-deftest latex-to-svg-backend-requires-a-hex-color ()
+  ;; Checked before anything else, so a caller bug signals whether or not
+  ;; the equation is cached or renderable.
+  (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () nil)))
+    (should-error (latex-to-svg-backend "$x$" :font-height 20))
+    (should-error (latex-to-svg-backend "$x$" :font-height 20 :color "grey50"))
+    (should-error (latex-to-svg-backend "$x$" :color "#000000" :background "gray97"))
+    (should-not (latex-to-svg-backend "$x$" :font-height 20 :color "#000000"
+                                      :background "#f7f7f7"))
+    ;; No height: the buffer is shown nowhere, no image is built, so no
+    ;; color is needed.
+    (should-not (latex-to-svg-backend "$x$"))))
 
 ;;;; Image cache
 
@@ -407,10 +410,10 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
             (let (img1 img2)
               (cl-letf (((symbol-function 'latex-to-svg-backend-display-scale)
                          (lambda (&rest _) 0.8)))
-                (setq img1 (latex-to-svg-backend--cached-image "K")))
+                (setq img1 (latex-to-svg-backend--cached-image "K" nil "#000000")))
               (cl-letf (((symbol-function 'latex-to-svg-backend-display-scale)
                          (lambda (&rest _) 1.5)))
-                (setq img2 (latex-to-svg-backend--cached-image "K")))
+                (setq img2 (latex-to-svg-backend--cached-image "K" nil "#000000")))
               (should img1)
               (should img2)
               ;; Two coexisting entries, one per scale.
@@ -418,7 +421,7 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
               ;; The first is still served from cache (warm, not evicted).
               (cl-letf (((symbol-function 'latex-to-svg-backend-display-scale)
                          (lambda (&rest _) 0.8)))
-                (should (eq img1 (latex-to-svg-backend--cached-image "K"))))
+                (should (eq img1 (latex-to-svg-backend--cached-image "K" nil "#000000"))))
               ;; Each image carries its own scale.
               (should (equal (image-property img1 :scale) 0.8))
               (should (equal (image-property img2 :scale) 1.5)))))
@@ -472,45 +475,6 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
                         :type 'file-missing)
           (should-not (directory-files (latex-to-svg-backend--fmt-dir) nil "\\.tex\\'")))
       (delete-directory latex-to-svg-backend-cache-directory t))))
-
-(ert-deftest latex-to-svg-backend-color-to-hex-reports-colorless-display ()
-  ;; An unknown name or an `unspecified-*' sentinel is nil, not an error: fall
-  ;; back silently.  A display that cannot resolve even white makes
-  ;; `color-name-to-rgb' signal; that falls back too, but is reported once.
-  (should (equal "#123456"
-                 (latex-to-svg-backend--color-to-hex "unspecified-fg" "#123456")))
-  (let ((warnings 0))
-    (cl-letf (((symbol-function 'color-name-to-rgb)
-               (lambda (&rest _) (signal 'wrong-type-argument (list 'numberp nil))))
-              ((symbol-function 'display-warning)
-               (lambda (&rest _) (cl-incf warnings))))
-      (clrhash latex-to-svg-backend--warned)
-      (should (equal "#123456"
-                     (latex-to-svg-backend--color-to-hex "grey50" "#123456")))
-      (should (equal "#123456"
-                     (latex-to-svg-backend--color-to-hex "grey80" "#123456")))
-      ;; One diagnosis for the display, not one per color.
-      (should (= 1 warnings)))))
-
-(ert-deftest latex-to-svg-backend-font-height-reports-unmeasurable-font ()
-  ;; Off a graphical frame there is nothing to measure and nothing to report.
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
-    (should-not (latex-to-svg-backend--font-height)))
-  ;; On a graphical frame, `default-font-height' signals when `font-info'
-  ;; cannot open the frame's font.  Reported once, and the height stays
-  ;; unknown so the caller defers sizing rather than guessing.
-  (let ((warnings 0))
-    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
-              ((symbol-function 'default-font-height)
-               (lambda (&rest _) (signal 'wrong-type-argument (list 'arrayp nil))))
-              ((symbol-function 'display-warning)
-               (lambda (&rest _) (cl-incf warnings))))
-      (clrhash latex-to-svg-backend--warned)
-      (should-not (latex-to-svg-backend--font-height))
-      (should-not (latex-to-svg-backend--font-height))
-      (should (= 1 warnings))
-      ;; Deferred, not guessed: no scale, so no image is built at a fiction.
-      (should-not (latex-to-svg-backend-display-scale)))))
 
 (ert-deftest latex-to-svg-backend-warn-once-reports-each-type-once ()
   ;; A recovered error is reported, but only the first of each kind: one
@@ -644,7 +608,7 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
                     ;; Collect the entry inside the window.
                     ((symbol-function 'latex-to-svg-backend--touch)
                      (lambda (file) (delete-file file))))
-            (should-not (latex-to-svg-backend--cached-image "K"))
+            (should-not (latex-to-svg-backend--cached-image "K" nil "#000000"))
             (should (= 0 (hash-table-count latex-to-svg-backend--image-cache)))))
       (when (file-exists-p tmp) (delete-file tmp)))))
 
@@ -2050,6 +2014,7 @@ NEWEST is a function returning the most recently started fake process."
            (key (latex-to-svg-backend--cache-key doc 'ratex))
            (callbacks 0))
       (should-not (latex-to-svg-backend doc :engine 'ratex :font-height 20
+                                        :color "#000000"
                                         :callback (lambda () (cl-incf callbacks))))
       (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
       (should (= callbacks 0))
@@ -2061,7 +2026,7 @@ NEWEST is a function returning the most recently started fake process."
       (should (= 1 (length l2s-test-warnings)))
       ;; Known failure: no compile, no second warning in this buffer.
       (should-not (latex-to-svg-backend doc :engine 'ratex :font-height 20
-                                        :callback #'ignore))
+                                        :color "#000000" :callback #'ignore))
       (should (= 1 (length l2s-test-processes)))
       (should (= 1 (length l2s-test-warnings)))
       ;; The LaTeX engine's entry is another one.
@@ -2069,7 +2034,8 @@ NEWEST is a function returning the most recently started fake process."
                    (latex-to-svg-backend--cache-key doc 'latex)))
       (latex-to-svg-backend-invalidate doc 'ratex)
       (should-not (file-exists-p (latex-to-svg-backend--meta-file key)))
-      (latex-to-svg-backend doc :engine 'ratex :font-height 20 :callback #'ignore)
+      (latex-to-svg-backend doc :engine 'ratex :font-height 20 :color "#000000"
+                                :callback #'ignore)
       (should (= 2 (length l2s-test-processes)))
       ;; The warnings were forgotten too, so a failure that remains is
       ;; reported again.
@@ -2135,7 +2101,7 @@ NEWEST is a function returning the most recently started fake process."
                 ((symbol-function 'message)
                  (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
         (should-not (latex-to-svg-backend doc :engine 'ratex :fallback 'latex
-                                          :font-height 20
+                                          :font-height 20 :color "#000000"
                                           :callback (lambda () (cl-incf callbacks))))
         (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
         (should (latex-to-svg-backend--failed-p ratex-key))
@@ -2151,7 +2117,8 @@ NEWEST is a function returning the most recently started fake process."
         (should-not l2s-test-warnings)
         ;; The caller re-queries with the same arguments.
         (should (eq 'image (latex-to-svg-backend doc :engine 'ratex :fallback 'latex
-                                                 :font-height 20 :callback #'ignore)))
+                                                 :font-height 20 :color "#000000"
+                                                 :callback #'ignore)))
         (should (eq 'latex (latex-to-svg-backend-engine-used doc 'ratex 'latex)))
         (should-not (latex-to-svg-backend-engine-used doc 'ratex))
         (should (= 3 (length l2s-test-processes)))
@@ -2163,11 +2130,12 @@ NEWEST is a function returning the most recently started fake process."
                                        "fell back to LaTeX: RaTeX could not parse it")
                                (buffer-name))))
         (latex-to-svg-backend doc :engine 'ratex :fallback 'latex
-                              :font-height 20 :callback #'ignore)
+                              :font-height 20 :color "#000000"
+                              :callback #'ignore)
         (should (= 1 (length timers)))
         ;; Fallback off: no picture, no compile.
         (should-not (latex-to-svg-backend doc :engine 'ratex :font-height 20
-                                          :callback #'ignore))
+                                          :color "#000000" :callback #'ignore))
         (should (= 3 (length l2s-test-processes)))))))
 
 (ert-deftest latex-to-svg-backend-fallback-counts-per-buffer ()
@@ -2695,7 +2663,7 @@ and one in a formula's own black.")
              (callbacks 0))
         (cl-letf (((symbol-function 'run-with-timer) #'ignore))
           (latex-to-svg-backend doc :engine 'ratex :fallback 'latex
-                                :font-height 20
+                                :font-height 20 :color "#000000"
                                 :callback (lambda () (cl-incf callbacks)))
           (with-temp-buffer
             (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes)))
@@ -2711,7 +2679,8 @@ and one in a formula's own black.")
           (should (file-exists-p (latex-to-svg-backend--svg-file latex-key)))
           (should (eq 'image (latex-to-svg-backend
                               doc :engine 'ratex :fallback 'latex
-                              :font-height 20 :callback #'ignore))))))))
+                              :font-height 20 :color "#000000"
+                              :callback #'ignore))))))))
 
 (ert-deftest latex-to-svg-backend-not-precompiled-end-to-end ()
   ;; End to end (needs latex + dvisvgm): project macros `\input' from a
@@ -2831,7 +2800,7 @@ and one in a formula's own black.")
     (setq-local latex-to-svg-backend-ratex-macros "\\def\\vv{\\mathbf{v}}")
     (let ((doc "$\\vv$"))
       (latex-to-svg-backend doc :engine 'latex :fallback 'ratex
-                            :font-height 20 :callback #'ignore)
+                            :font-height 20 :color "#000000" :callback #'ignore)
       (let ((latex (car l2s-test-processes)))
         (with-temp-file (expand-file-name "equation.log" (aref latex 4))
           (insert "! Undefined control sequence.\n"))

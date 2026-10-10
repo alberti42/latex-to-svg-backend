@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The backend reads no faces and no frames. A front-end passes the tint and
+the font height it measured on the frame that shows its buffer.
+
+### Changed
+
+- `:color` is required whenever `:font-height` is given; a nil `:color`
+  then signals an error. Before, a nil `:color` tinted the equation with
+  the `default` face of the selected frame.
+
+- `:color` and `:background` must be `#rrggbb` strings; a color name or
+  any other form signals an error. Before, a name was resolved on the
+  selected frame, a `:color` that did not resolve became black, and a
+  `:background` that did not resolve went into the SVG unchanged.
+
+- A nil `:font-height` means the buffer is shown nowhere: the backend
+  compiles and caches the SVG and returns nil. Before, it measured the
+  selected frame when that frame was graphical.
+  `latex-to-svg-backend-display-scale` returns nil without a
+  `font-height` for the same reason.
+
+### Removed
+
+- `latex-to-svg-backend-appearance`. A front-end builds its own
+  signature from the values it passes.
+
+- `latex-to-svg-backend-foreground-color`.
+
+- `latex-to-svg-backend-use-placeholder` and the placeholder panel. For an
+  equation the backend returns nil for, the front-end shows its LaTeX
+  source.
+
 ## [0.13.0] - 2026-10-10
 
 ### Added
