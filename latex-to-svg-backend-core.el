@@ -37,6 +37,7 @@
 (eval-when-compile
   (require 'cl-lib))
 (require 'color)
+(require 'image)
 (require 'seq)
 (require 'svg)
 
