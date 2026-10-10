@@ -143,88 +143,128 @@
                            "github.com/alberti42/latex-to-svg-backend/issues" m))
                         warnings)))))
 
+(ert-deftest latex-to-svg-backend-warns-once-of-svg-dpi ()
+  ;; `-svg-dpi' has no effect since 0.14.0: a value other than its default
+  ;; is reported once per session.
+  (let ((latex-to-svg-backend--warned (make-hash-table :test 'equal))
+        (warnings nil))
+    (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) #'ignore)
+              ((symbol-function 'display-warning)
+               (lambda (_type message &rest _) (push message warnings))))
+      (with-suppressed-warnings ((obsolete latex-to-svg-backend-svg-dpi))
+        (latex-to-svg-backend "$x$")
+        (should-not (seq-some (lambda (m) (string-search "svg-dpi" m)) warnings))
+        (let ((latex-to-svg-backend-svg-dpi 144.0))
+          (latex-to-svg-backend "$x$")
+          (latex-to-svg-backend "$y$")))
+      (should (= 1 (seq-count (lambda (m) (string-search "svg-dpi" m))
+                              warnings))))))
+
 ;;;; Scale
 
-(ert-deftest latex-to-svg-backend-display-scale-nil-when-height-unknown ()
-  ;; No FONT-HEIGHT means the buffer is shown nowhere: the scale is nil,
+(ert-deftest latex-to-svg-backend-px-per-pt-nil-when-size-unknown ()
+  ;; No FONT-SIZE means the buffer is shown nowhere: there is no size,
   ;; whatever RESCALE-BY, and no frame is measured -- not even a graphical
   ;; selected one.
   (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
             ((symbol-function 'default-font-height) (lambda (&rest _) 20)))
-    (should (equal (latex-to-svg-backend-display-scale) nil))
-    (should (equal (latex-to-svg-backend-display-scale 1.3) nil))))
+    (should-not (latex-to-svg-backend--px-per-pt nil))
+    (should-not (latex-to-svg-backend--px-per-pt nil 1.3))))
 
-(ert-deftest latex-to-svg-backend-px-per-pt-is-deterministic ()
-  ;; Pixels-per-point is a pure function of `latex-to-svg-backend-svg-dpi' — no
-  ;; measurement, so it never varies between calls (the bug this fixed).
-  (let ((latex-to-svg-backend-svg-dpi 96.0))
-    (should (equal (latex-to-svg-backend--svg-px-per-pt) (/ 96.0 72.0))))
-  (let ((latex-to-svg-backend-svg-dpi 144.0))
-    (should (equal (latex-to-svg-backend--svg-px-per-pt) 2.0))))
+(ert-deftest latex-to-svg-backend-px-per-pt-matches-the-em ()
+  ;; The equation's em, 10pt or 9.96264 SVG pt, is displayed at FONT-SIZE
+  ;; pixels times font-scale and RESCALE-BY.  Nothing is measured, and the
+  ;; obsolete `-svg-dpi' does not enter.
+  (let ((latex-to-svg-backend-font-scale 1.0))
+    (should (< (abs (- (* latex-to-svg-backend--em
+                          (latex-to-svg-backend--px-per-pt 18))
+                       18))
+               1e-9))
+    (with-suppressed-warnings ((obsolete latex-to-svg-backend-svg-dpi))
+      (let ((latex-to-svg-backend-svg-dpi 144.0))
+        (should (< (abs (- (* latex-to-svg-backend--em
+                              (latex-to-svg-backend--px-per-pt 18))
+                           18))
+                   1e-9))))
+    (should (< (abs (- (latex-to-svg-backend--px-per-pt 18 1.5)
+                       (* 1.5 (latex-to-svg-backend--px-per-pt 18))))
+               1e-9)))
+  (let ((latex-to-svg-backend-font-scale 2.0))
+    (should (< (abs (- (* latex-to-svg-backend--em
+                          (latex-to-svg-backend--px-per-pt 18))
+                       36))
+               1e-9))))
 
-(ert-deftest latex-to-svg-backend-image-width-from-the-svg ()
-  ;; The displayed width is computed from the root `<svg>' width and the
-  ;; image's `:scale': pt at `latex-to-svg-backend-svg-dpi' / 72 pixels.
-  (let ((latex-to-svg-backend-svg-dpi 144.0))   ; dpi/72 = 2.0
-    (should (equal (latex-to-svg-backend-image-width
-                    (list 'image :type 'svg :scale 1.5 :data
-                          "<svg xmlns='http://www.w3.org/2000/svg' \
-width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
-                   30.0))
-    ;; No SVG width in pt: nil.
-    (should-not (latex-to-svg-backend-image-width
-                 (list 'image :type 'svg :scale 1.0 :data
-                       "<svg width=\"40\" height=\"20\"><rect/></svg>")))
-    (should-not (latex-to-svg-backend-image-width
-                 (list 'image :type 'svg :data "<svg viewBox='0 0 1 1'/>")))
-    (should-not (latex-to-svg-backend-image-width
-                 (list 'image :type 'svg :file "x.svg")))
-    (should-not (latex-to-svg-backend-image-width 'not-an-image))))
+(ert-deftest latex-to-svg-backend-image-width-is-the-width-property ()
+  ;; Every image the backend returns has `:width' in pixels at `:scale' 1.0,
+  ;; which is its displayed width.
+  (should (equal (latex-to-svg-backend-image-width
+                  (list 'image :type 'svg :scale 1.0 :width 30 :data "<svg/>"))
+                 30))
+  (should-not (latex-to-svg-backend-image-width
+               (list 'image :type 'svg :data "<svg/>")))
+  (should-not (latex-to-svg-backend-image-width 'not-an-image)))
 
-(ert-deftest latex-to-svg-backend-image-width-includes-padding ()
-  ;; `--load-svg-image' pads the SVG before `create-image', so the width
-  ;; includes the left and right padding.  Needs an Emacs built with
-  ;; librsvg, as the `--load-svg-image' tests below.
+(ert-deftest latex-to-svg-backend-load-svg-sizes-by-width ()
+  ;; The image is the SVG's width in pt times PX-PER-PT pixels wide,
+  ;; rounded, at `:scale' 1.0, so `image-scaling-factor' does not apply.
+  ;; The padding is included.  Needs an Emacs built with librsvg, as the
+  ;; `--load-svg-image' tests below.
   (skip-unless (image-type-available-p 'svg))
-  (let ((tmp (make-temp-file "l2s-width-pad" nil ".svg"))
-        (latex-to-svg-backend-svg-dpi 144.0))   ; dpi/72 = 2.0
+  (let ((tmp (make-temp-file "l2s-width-pad" nil ".svg")))
     (unwind-protect
         (progn
           (with-temp-file tmp
             (insert "<svg xmlns='http://www.w3.org/2000/svg' "
                     "width='10pt' height='5pt' viewBox='0 0 10 5'>"
                     "<path fill='currentColor' d='M0 0h1v1z'/></svg>"))
-          ;; (10 + 2 right + 4 left) pt * 2.0 px/pt * 1.5 = 48 px.
+          (let ((image (latex-to-svg-backend--load-svg-image tmp 2.0 "#000")))
+            (should (equal (image-property image :width) 20))
+            (should (equal (image-property image :scale) 1.0)))
+          ;; (10 + 2 right + 4 left) pt * 2.0 px/pt = 32 px.
           (should (equal (latex-to-svg-backend-image-width
                           (latex-to-svg-backend--load-svg-image
-                           tmp 1.5 "#000" nil '(1 2 3 4)))
-                         48.0)))
+                           tmp 2.0 "#000" nil '(1 2 3 4)))
+                         32))
+          (should (equal (image-property
+                          (latex-to-svg-backend--load-svg-image tmp 1.04 "#000")
+                          :width)
+                         10)))
       (delete-file tmp))))
 
-(ert-deftest latex-to-svg-backend-display-scale-matches-font ()
-  ;; The display scale maps the LaTeX 10pt body font onto the buffer font
-  ;; height: scale = target * font-scale / (10 * dpi/72).  Pass FONT-HEIGHT
-  ;; directly so the arithmetic is checked deterministically (no frame).
-  (let ((latex-to-svg-backend-svg-dpi 144.0))   ; dpi/72 = 2.0
-    (let ((latex-to-svg-backend-font-scale 1.0))
-      (should (equal (latex-to-svg-backend-display-scale nil 28)
-                     (/ 28.0 (* 10.0 2.0)))))
-    ;; Doubling font-scale doubles the displayed size.
-    (let* ((latex-to-svg-backend-font-scale 1.0)
-           (base (latex-to-svg-backend-display-scale nil 28))
-           (latex-to-svg-backend-font-scale 2.0))
-      (should (equal (latex-to-svg-backend-display-scale nil 28) (* 2 base))))))
+;;;; Baseline
 
-(ert-deftest latex-to-svg-backend-display-scale-rescale-by-multiplies ()
-  ;; RESCALE-BY is a per-call multiplier on top of the global font-scale, so
-  ;; a front-end can size display equations larger than inline without
-  ;; touching the base.  FONT-HEIGHT is passed explicitly (no frame guess).
-  (let ((latex-to-svg-backend-svg-dpi 144.0)      ; dpi/72 = 2.0
-        (latex-to-svg-backend-font-scale 1.0))
-    (let ((base (latex-to-svg-backend-display-scale nil 28)))
-      (should (equal (latex-to-svg-backend-display-scale 1.0 28) base))
-      (should (< (abs (- (latex-to-svg-backend-display-scale 1.5 28) (* 1.5 base)))
-                 1e-9)))))
+(ert-deftest latex-to-svg-backend-ascent-puts-the-baseline-on-the-line ()
+  ;; The ascent is the share of the image above the baseline the SVG gives,
+  ;; in percent, kept within 0..100; with no baseline, as for a display
+  ;; equation, the image is centred.
+  (let ((svg (lambda (y top height)
+               (latex-to-svg-backend--mark-baseline
+                (format "<svg xmlns='http://www.w3.org/2000/svg' width='10pt' \
+height='%spt' viewBox='0 %s 10 %s'><path d='M0 0'/></svg>" height top height)
+                y))))
+    (should (equal (latex-to-svg-backend--ascent (funcall svg 8 0 10)) 80))
+    (should (equal (latex-to-svg-backend--ascent (funcall svg -62.5 -70 10)) 75))
+    ;; All the ink below the baseline, or above it.
+    (should (equal (latex-to-svg-backend--ascent (funcall svg -1 0 10)) 0))
+    (should (equal (latex-to-svg-backend--ascent (funcall svg 12 0 10)) 100))
+    (should (eq (latex-to-svg-backend--ascent (funcall svg nil 0 10)) 'center))
+    ;; Padding moves the viewport, not the baseline: 2pt on top and bottom
+    ;; of a 10pt image with the baseline 8pt down make it 10/14 above.
+    (should (equal (latex-to-svg-backend--ascent
+                    (latex-to-svg-backend--pad-svg (funcall svg 8 0 10)
+                                                   '(2 0) nil))
+                   71))))
+
+(ert-deftest latex-to-svg-backend-baseline-comment-round-trips ()
+  (should (equal (latex-to-svg-backend--svg-baseline
+                  (latex-to-svg-backend--mark-baseline "<svg width='1pt'></svg>" -61.897857))
+                 -61.897857))
+  (should-not (latex-to-svg-backend--svg-baseline "<svg width='1pt'></svg>"))
+  ;; As dvisvgm writes it, from the special of the LaTeX engine.
+  (should (equal (latex-to-svg-backend--svg-baseline
+                  "<svg><g><!--latex-to-svg-backend-baseline -65.71802--></g></svg>")
+                 -65.71802)))
 
 ;;;; Colors
 
@@ -241,14 +281,19 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
   ;; the equation is cached or renderable.
   (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () nil))
             ((symbol-function 'display-warning) #'ignore))
-    (should-error (latex-to-svg-backend "$x$" :font-height 20))
-    (should-error (latex-to-svg-backend "$x$" :font-height 20 :color "grey50"))
+    (should-error (latex-to-svg-backend "$x$" :font-size 20))
+    (should-error (latex-to-svg-backend "$x$" :font-size 20 :color "grey50"))
     (should-error (latex-to-svg-backend "$x$" :color "#000000" :background "gray97"))
-    (should-not (latex-to-svg-backend "$x$" :font-height 20 :color "#000000"
+    (should-not (latex-to-svg-backend "$x$" :font-size 20 :color "#000000"
                                       :background "#f7f7f7"))
-    ;; No height: the buffer is shown nowhere, no image is built, so no
+    ;; No size: the buffer is shown nowhere, no image is built, so no
     ;; color is needed.
-    (should-not (latex-to-svg-backend "$x$"))))
+    (should-not (latex-to-svg-backend "$x$"))
+    ;; A size is a positive number of pixels, and the keyword of 0.13.0
+    ;; is gone.
+    (should-error (latex-to-svg-backend "$x$" :font-size 0 :color "#000000"))
+    (should-error (latex-to-svg-backend "$x$" :font-size "18" :color "#000000"))
+    (should-error (latex-to-svg-backend "$x$" :font-height 20 :color "#000000"))))
 
 ;;;; Image cache
 
@@ -278,7 +323,8 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
     (unwind-protect
         (progn
           (with-temp-file tmp
-            (insert "<svg xmlns='http://www.w3.org/2000/svg'>"
+            (insert "<svg xmlns='http://www.w3.org/2000/svg' "
+                    "width='1pt' height='1pt' viewBox='0 0 1 1'>"
                     "<path fill='currentColor' d='M0 0h1v1z'/></svg>"))
           (let ((data (image-property
                        (latex-to-svg-backend--load-svg-image tmp 1.0 "#abcdef")
@@ -295,7 +341,8 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
     (unwind-protect
         (progn
           (with-temp-file tmp
-            (insert "<svg xmlns='http://www.w3.org/2000/svg'>"
+            (insert "<svg xmlns='http://www.w3.org/2000/svg' "
+                    "width='1pt' height='1pt' viewBox='0 0 1 1'>"
                     "<path fill='currentColor' d='M0 0h1v1z'/></svg>"))
           (should-not (image-property
                        (latex-to-svg-backend--load-svg-image tmp 1.0 "#000")
@@ -411,39 +458,43 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
                   "K" 0.8 "#fff" "#eee"
                   (latex-to-svg-backend--pad-box '(6 6 6 6))))))
 
-(ert-deftest latex-to-svg-backend-image-cache-coexists-per-scale ()
-  ;; The same on-disk SVG cached at two display scales yields two distinct
+(ert-deftest latex-to-svg-backend-image-cache-coexists-per-size ()
+  ;; The same on-disk SVG cached at two font sizes yields two distinct
   ;; image objects that coexist: the first stays warm after the second is
   ;; created (so a sibling buffer's images survive a font change — no clear).
   (skip-unless (image-type-available-p 'svg))
-  (let ((tmp (make-temp-file "l2s-svg" nil ".svg")))
+  (let ((tmp (make-temp-file "l2s-svg" nil ".svg"))
+        (latex-to-svg-backend-font-scale 1.0))
     (unwind-protect
         (progn
           (with-temp-file tmp
             (insert "<svg xmlns='http://www.w3.org/2000/svg' "
-                    "width='10pt' height='10pt'>"
+                    "width='9.96264pt' height='9.96264pt' "
+                    "viewBox='0 0 9.96264 9.96264'>"
                     "<rect width='10' height='10'/></svg>"))
           (clrhash latex-to-svg-backend--image-cache)
           (cl-letf (((symbol-function 'latex-to-svg-backend--svg-file)
                      (lambda (_key) tmp)))
-            (let (img1 img2)
-              (cl-letf (((symbol-function 'latex-to-svg-backend-display-scale)
-                         (lambda (&rest _) 0.8)))
-                (setq img1 (latex-to-svg-backend--cached-image "K" nil "#000000")))
-              (cl-letf (((symbol-function 'latex-to-svg-backend-display-scale)
-                         (lambda (&rest _) 1.5)))
-                (setq img2 (latex-to-svg-backend--cached-image "K" nil "#000000")))
+            (let ((img1 (latex-to-svg-backend--cached-image
+                         "K" nil "#000000" nil nil 18))
+                  (img2 (latex-to-svg-backend--cached-image
+                         "K" nil "#000000" nil nil 24)))
               (should img1)
               (should img2)
-              ;; Two coexisting entries, one per scale.
+              ;; Two coexisting entries, one per size.
               (should (= 2 (hash-table-count latex-to-svg-backend--image-cache)))
               ;; The first is still served from cache (warm, not evicted).
-              (cl-letf (((symbol-function 'latex-to-svg-backend-display-scale)
-                         (lambda (&rest _) 0.8)))
-                (should (eq img1 (latex-to-svg-backend--cached-image "K" nil "#000000"))))
-              ;; Each image carries its own scale.
-              (should (equal (image-property img1 :scale) 0.8))
-              (should (equal (image-property img2 :scale) 1.5)))))
+              (should (eq img1 (latex-to-svg-backend--cached-image
+                                "K" nil "#000000" nil nil 18)))
+              ;; An SVG one em wide is FONT-SIZE pixels wide.
+              (should (equal (image-property img1 :width) 18))
+              (should (equal (image-property img2 :width) 24))
+              ;; RESCALE-BY is a size of its own.
+              (should (equal (image-property
+                              (latex-to-svg-backend--cached-image
+                               "K" 1.5 "#000000" nil nil 18)
+                              :width)
+                             27)))))
       (delete-file tmp))))
 
 (ert-deftest latex-to-svg-backend-failed-dump-is-not-retried-per-equation ()
@@ -622,12 +673,11 @@ width='10.0000pt' height='5.0000pt' viewBox='0 0 10 5'><path/></svg>"))
           (clrhash latex-to-svg-backend--image-cache)
           (cl-letf (((symbol-function 'latex-to-svg-backend--svg-file)
                      (lambda (_key) tmp))
-                    ((symbol-function 'latex-to-svg-backend-display-scale)
-                     (lambda (&rest _) 0.8))
                     ;; Collect the entry inside the window.
                     ((symbol-function 'latex-to-svg-backend--touch)
                      (lambda (file) (delete-file file))))
-            (should-not (latex-to-svg-backend--cached-image "K" nil "#000000"))
+            (should-not (latex-to-svg-backend--cached-image
+                         "K" nil "#000000" nil nil 18))
             (should (= 0 (hash-table-count latex-to-svg-backend--image-cache)))))
       (when (file-exists-p tmp) (delete-file tmp)))))
 
@@ -1702,6 +1752,7 @@ Return the SVG path."
         (should (equal (latex-to-svg-backend-tests--tex-source tex)
                        (concat (latex-to-svg-backend--preamble) "\n"
                                "\\begin{document}\n" doc "\n"
+                               latex-to-svg-backend--latex-baseline-mark
                                "\\end{document}\n")))))))
 
 (ert-deftest latex-to-svg-backend-safe-locals-exclude-the-dangerous-ones ()
@@ -1944,7 +1995,10 @@ Return the SVG path."
                              "--font-size" "40" "--dpr" "0.25"
                              "--padding" "0" "--color" "#010203"
                              "--inline")))
-        (should (equal (latex-to-svg-backend-tests--tex-source input) "x^2\n"))
+        ;; An inline formula gets the strut that puts its baseline at the
+        ;; middle of RaTeX's SVG.
+        (should (equal (latex-to-svg-backend-tests--tex-source input)
+                       (concat "x^2 " latex-to-svg-backend--ratex-strut "\n")))
         (with-temp-file (expand-file-name "0001.svg" scratch)
           (insert latex-to-svg-backend-tests--ratex-output))
         (latex-to-svg-backend-tests--finish-fake-process process 0)
@@ -1952,6 +2006,9 @@ Return the SVG path."
         (with-temp-buffer
           (insert-file-contents svg)
           (should (search-forward "viewBox='1.0000 -0.5000" nil t))
+          ;; The middle of the uncropped 10pt-high viewport.
+          (should (search-forward "<!--latex-to-svg-backend-baseline 5.000000-->"
+                                  nil t))
           (should (search-forward "currentColor" nil t)))
         (should-not (file-exists-p (latex-to-svg-backend--meta-file key)))
         (should-not (gethash key latex-to-svg-backend--pending))
@@ -2041,7 +2098,7 @@ NEWEST is a function returning the most recently started fake process."
     (let* ((doc "$\\SI{3}{m}$")
            (key (latex-to-svg-backend--cache-key doc 'ratex))
            (callbacks 0))
-      (should-not (latex-to-svg-backend doc :engine 'ratex :font-height 20
+      (should-not (latex-to-svg-backend doc :engine 'ratex :font-size 20
                                         :color "#000000"
                                         :callback (lambda () (cl-incf callbacks))))
       (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
@@ -2053,7 +2110,7 @@ NEWEST is a function returning the most recently started fake process."
       (should-not (latex-to-svg-backend-metadata doc 'ratex))
       (should (= 1 (length l2s-test-warnings)))
       ;; Known failure: no compile, no second warning in this buffer.
-      (should-not (latex-to-svg-backend doc :engine 'ratex :font-height 20
+      (should-not (latex-to-svg-backend doc :engine 'ratex :font-size 20
                                         :color "#000000" :callback #'ignore))
       (should (= 1 (length l2s-test-processes)))
       (should (= 1 (length l2s-test-warnings)))
@@ -2062,7 +2119,7 @@ NEWEST is a function returning the most recently started fake process."
                    (latex-to-svg-backend--cache-key doc 'latex)))
       (latex-to-svg-backend-invalidate doc 'ratex)
       (should-not (file-exists-p (latex-to-svg-backend--meta-file key)))
-      (latex-to-svg-backend doc :engine 'ratex :font-height 20 :color "#000000"
+      (latex-to-svg-backend doc :engine 'ratex :font-size 20 :color "#000000"
                                 :callback #'ignore)
       (should (= 2 (length l2s-test-processes)))
       ;; The warnings were forgotten too, so a failure that remains is
@@ -2129,7 +2186,7 @@ NEWEST is a function returning the most recently started fake process."
                 ((symbol-function 'message)
                  (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
         (should-not (latex-to-svg-backend doc :engine 'ratex :fallback 'latex
-                                          :font-height 20 :color "#000000"
+                                          :font-size 20 :color "#000000"
                                           :callback (lambda () (cl-incf callbacks))))
         (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
         (should (latex-to-svg-backend--failed-p ratex-key))
@@ -2145,7 +2202,7 @@ NEWEST is a function returning the most recently started fake process."
         (should-not l2s-test-warnings)
         ;; The caller re-queries with the same arguments.
         (should (eq 'image (latex-to-svg-backend doc :engine 'ratex :fallback 'latex
-                                                 :font-height 20 :color "#000000"
+                                                 :font-size 20 :color "#000000"
                                                  :callback #'ignore)))
         (should (eq 'latex (latex-to-svg-backend-engine-used doc 'ratex 'latex)))
         (should-not (latex-to-svg-backend-engine-used doc 'ratex))
@@ -2158,11 +2215,11 @@ NEWEST is a function returning the most recently started fake process."
                                        "fell back to LaTeX: RaTeX could not parse it")
                                (buffer-name))))
         (latex-to-svg-backend doc :engine 'ratex :fallback 'latex
-                              :font-height 20 :color "#000000"
+                              :font-size 20 :color "#000000"
                               :callback #'ignore)
         (should (= 1 (length timers)))
         ;; Fallback off: no picture, no compile.
-        (should-not (latex-to-svg-backend doc :engine 'ratex :font-height 20
+        (should-not (latex-to-svg-backend doc :engine 'ratex :font-size 20
                                           :color "#000000" :callback #'ignore))
         (should (= 3 (length l2s-test-processes)))))))
 
@@ -2484,6 +2541,40 @@ and one in a formula's own black.")
       (delete-directory dir t)
       (delete-file svg))))
 
+(ert-deftest latex-to-svg-backend-texres-store-gives-the-baseline ()
+  ;; The compile logs the baseline's height above the page bottom in sp,
+  ;; and the page's height; pdftocairo puts the page top at y 0 and writes
+  ;; big points.  A display equation logs nothing and gets no baseline.
+  (let ((dir (make-temp-file "l2s-texres-store" t))
+        (svg (make-temp-file "l2s-texres-store" nil ".svg")))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "cairo.svg" dir)
+            (insert latex-to-svg-backend-tests--cairo-output))
+          (with-temp-file (expand-file-name "equation.log" dir)
+            (insert "(./equation.tex\n"
+                    "latex-to-svg-backend-baseline 262145 14.0pt\n"
+                    ")\n"))
+          ;; (14pt - 4pt) * 72 / 72.27.
+          (should (< (abs (- (latex-to-svg-backend--texres-baseline dir)
+                             (* 10.0000153 (/ 72 72.27))))
+                     1e-4))
+          (should (latex-to-svg-backend--texres-store dir svg))
+          (with-temp-buffer
+            (insert-file-contents svg)
+            (should (< (abs (- (latex-to-svg-backend--svg-baseline
+                                (buffer-string))
+                               9.9626))
+                       1e-3)))
+          (delete-file (expand-file-name "equation.log" dir))
+          (should-not (latex-to-svg-backend--texres-baseline dir))
+          (should (latex-to-svg-backend--texres-store dir svg))
+          (with-temp-buffer
+            (insert-file-contents svg)
+            (should-not (latex-to-svg-backend--svg-baseline (buffer-string)))))
+      (delete-directory dir t)
+      (delete-file svg))))
+
 (ert-deftest latex-to-svg-backend-texres-compile-end-to-end ()
   ;; End to end (needs texres and `pdftocairo'): inline, display and a
   ;; numbered environment render, cropped and color-independent.
@@ -2537,6 +2628,43 @@ and one in a formula's own black.")
                 (should (search-forward "<svg xmlns='http://www.w3.org/2000/svg' width='" nil t))
                 (should (search-forward "currentColor" nil t))))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
+
+(ert-deftest latex-to-svg-backend-baseline-end-to-end ()
+  ;; End to end, for each engine whose programs are found: an inline
+  ;; equation's SVG gives its baseline, which puts most of `x' and about
+  ;; two thirds of `y' above it; a display equation gives none and is
+  ;; centred.
+  (let ((engines (seq-filter #'latex-to-svg-backend-tools-available-p
+                             '(latex ratex texres))))
+    (skip-unless engines)
+    (let ((latex-to-svg-backend-cache-directory
+           (make-temp-file "l2s-baseline-e2e" t))
+          (latex-to-svg-backend-ratex-macros ""))
+      (unwind-protect
+          (cl-letf (((symbol-function 'latex-to-svg-backend-available-p)
+                     (lambda () t))
+                    ((symbol-function 'display-warning)
+                     (lambda (&rest w) (error "Unexpected warning: %S" w))))
+            (dolist (engine engines)
+              (dolist (doc '("$x$" "$y$" "\\[x=1\\]"))
+                (let ((done 'pending))
+                  (latex-to-svg-backend doc :engine engine
+                                        :callback (lambda () (setq done t)))
+                  (dotimes (_ 200)
+                    (when (eq done 'pending)
+                      (accept-process-output nil 0.1)))
+                  (should (eq done t))
+                  (let ((ascent (latex-to-svg-backend--ascent
+                                 (with-temp-buffer
+                                   (insert-file-contents
+                                    (latex-to-svg-backend--svg-file
+                                     (latex-to-svg-backend--cache-key doc engine)))
+                                   (buffer-string)))))
+                    (pcase doc
+                      ("$x$" (should (<= 95 ascent 100)))
+                      ("$y$" (should (<= 60 ascent 80)))
+                      (_ (should (eq ascent 'center)))))))))
+        (delete-directory latex-to-svg-backend-cache-directory t)))))
 
 (ert-deftest latex-to-svg-backend-fallback-end-to-end ()
   ;; End to end (needs both engines): RaTeX has no `\sideset', LaTeX with
@@ -2666,6 +2794,7 @@ and one in a formula's own black.")
                          (concat "%& " (file-name-sans-extension fmt) "\n"
                                  text "\n"
                                  "\\begin{document}\n" doc "\n"
+                                 latex-to-svg-backend--latex-baseline-mark
                                  "\\end{document}\n")))
           (with-temp-buffer
             (latex-to-svg-backend-tests--finish-fake-process
@@ -2675,6 +2804,7 @@ and one in a formula's own black.")
                          (concat (latex-to-svg-backend--preamble) "\n"
                                  text "\n"
                                  "\\begin{document}\n" doc "\n"
+                                 latex-to-svg-backend--latex-baseline-mark
                                  "\\end{document}\n"))))))))
 
 (ert-deftest latex-to-svg-backend-fallback-uses-the-requesting-buffer ()
@@ -2691,7 +2821,7 @@ and one in a formula's own black.")
              (callbacks 0))
         (cl-letf (((symbol-function 'run-with-timer) #'ignore))
           (latex-to-svg-backend doc :engine 'ratex :fallback 'latex
-                                :font-height 20 :color "#000000"
+                                :font-size 20 :color "#000000"
                                 :callback (lambda () (cl-incf callbacks)))
           (with-temp-buffer
             (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes)))
@@ -2707,7 +2837,7 @@ and one in a formula's own black.")
           (should (file-exists-p (latex-to-svg-backend--svg-file latex-key)))
           (should (eq 'image (latex-to-svg-backend
                               doc :engine 'ratex :fallback 'latex
-                              :font-height 20 :color "#000000"
+                              :font-size 20 :color "#000000"
                               :callback #'ignore))))))))
 
 (ert-deftest latex-to-svg-backend-not-precompiled-end-to-end ()
@@ -2828,7 +2958,7 @@ and one in a formula's own black.")
     (setq-local latex-to-svg-backend-ratex-macros "\\def\\vv{\\mathbf{v}}")
     (let ((doc "$\\vv$"))
       (latex-to-svg-backend doc :engine 'latex :fallback 'ratex
-                            :font-height 20 :color "#000000" :callback #'ignore)
+                            :font-size 20 :color "#000000" :callback #'ignore)
       (let ((latex (car l2s-test-processes)))
         (with-temp-file (expand-file-name "equation.log" (aref latex 4))
           (insert "! Undefined control sequence.\n"))

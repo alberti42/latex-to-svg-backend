@@ -630,6 +630,21 @@ is a disk problem, not the input's, and does not count."
            (and (re-search-forward "^! " nil t)
                 (not (looking-at-p "I can't write on file")))))))
 
+(defconst latex-to-svg-backend--latex-baseline-mark
+  (concat "\\ifhmode\\ifnum\\prevgraf=0 \\special{dvisvgm:raw "
+          (format latex-to-svg-backend--baseline-comment "{?y}")
+          "}\\fi\\fi\n")
+  "Text after the equation that marks the baseline of its line.
+dvisvgm writes the special's text into the SVG with `{?y}' replaced by
+the current vertical position, in the SVG's coordinates: after inline
+math that is the baseline of its line.  After a display TeX has resumed
+the paragraph on a new line, below the equation, and counts the display
+as three lines in `\\prevgraf', so the mark is written only while
+`\\prevgraf' is 0, before any display.  A display equation therefore
+has no baseline, and is centred on its line (see
+`latex-to-svg-backend--ascent').  Inline math sits on the baseline of
+the last line of its paragraph, as text does.")
+
 (defun latex-to-svg-backend--latex-toolchain ()
   "Return the toolchain of the LaTeX engine: `latex', then `dvisvgm'.
 A toolchain is the plist `latex-to-svg-backend--compile' runs:
@@ -639,6 +654,7 @@ A toolchain is the plist `latex-to-svg-backend--compile' runs:
   :program  the TeX program, nil meaning `latex-to-svg-backend-latex-program';
   :output   the file the TeX program writes in the scratch directory;
   :prefix   text written after `\\begin{document}', before the equation;
+  :suffix   text written after the equation, before `\\end{document}';
   :convert  a function of the scratch directory, the TeX output file
             and the cache SVG, returning the stages that make the SVG
             (see `latex-to-svg-backend--run-process-chain');
@@ -651,11 +667,14 @@ scale 1: the SVG is vector (glyphs are outline paths via --no-fonts),
 so the scale doesn't affect quality, and the displayed size is set
 later by `latex-to-svg-backend-display-scale'.  `--currentcolor'
 rewrites the default ink to the `currentColor' token, so the file is
-color-independent (tinted at display time)."
+color-independent (tinted at display time).  The suffix
+`latex-to-svg-backend--latex-baseline-mark' has dvisvgm write the
+baseline of an inline equation into the SVG."
   (list :engine 'latex
         :program nil
         :output "equation.dvi"
         :prefix ""
+        :suffix latex-to-svg-backend--latex-baseline-mark
         :convert (lambda (_dir dvi svg)
                    (list
                     (list 'dvisvgm
@@ -725,7 +744,10 @@ A theme change therefore re-tints from cache without recompiling."
                        ;; its own math delimiters / environment (chosen by
                        ;; the front-end), which also decide inline vs
                        ;; display sizing.
+                       ;; A newline first, so that a `%' comment at the end
+                       ;; of LATEX does not hide the suffix.
                        latex "\n"
+                       (or (plist-get toolchain :suffix) "")
                        "\\end{document}\n"))
          (cleanup (lambda () (delete-directory dir t)))
          (output-buffer (generate-new-buffer

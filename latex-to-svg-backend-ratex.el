@@ -143,6 +143,16 @@ does for the LaTeX engine.  A formula's own `\\color' keeps its color.")
 (defconst latex-to-svg-backend--ratex-ink-svg "rgba(1,2,3,1)"
   "How RaTeX writes `latex-to-svg-backend--ratex-ink' in its SVG.")
 
+(defconst latex-to-svg-backend--ratex-strut
+  "\\vphantom{\\rule[-200pt]{0pt}{400pt}}"
+  "An invisible strut appended to an inline formula.
+It makes the formula's box reach 200pt above and below the baseline,
+so the baseline is at the middle of the SVG RaTeX writes: RaTeX
+reports no height or depth of its own.  It draws nothing and has no
+width, and `latex-to-svg-backend--crop-to-ink' removes the space it
+adds.  A formula taller than 200pt above or below the baseline would
+move the baseline; 200pt is 20 em.")
+
 (defun latex-to-svg-backend--ratex-svg (svg)
   "Return RaTeX's SVG made color-independent and cropped to its ink, or nil.
 See `latex-to-svg-backend--crop-to-ink'; the default ink is drawn in
@@ -152,18 +162,24 @@ bearings stay inside it, until the crop."
   (latex-to-svg-backend--crop-to-ink
    svg (regexp-quote latex-to-svg-backend--ratex-ink-svg)))
 
-(defun latex-to-svg-backend--ratex-store (output svg)
+(defun latex-to-svg-backend--ratex-store (output svg &optional inline)
   "Write RaTeX's OUTPUT file to the cache file SVG, ready for display.
-See `latex-to-svg-backend--ratex-svg' for what changes.  Return non-nil
-on success, nil when OUTPUT has no SVG root element."
-  (when-let* ((data (latex-to-svg-backend--ratex-svg
-                     (with-temp-buffer
-                       (let ((coding-system-for-read 'utf-8))
-                         (insert-file-contents output))
-                       (buffer-string)))))
-    (let ((coding-system-for-write 'utf-8-unix))
+See `latex-to-svg-backend--ratex-svg' for what changes.  INLINE non-nil
+means the formula carries `latex-to-svg-backend--ratex-strut', so the
+baseline is at the middle of OUTPUT's viewport, and the SVG gives it
+\(see `latex-to-svg-backend--baseline-comment').  Return non-nil on
+success, nil when OUTPUT has no SVG root element."
+  (when-let* ((raw (with-temp-buffer
+                     (let ((coding-system-for-read 'utf-8))
+                       (insert-file-contents output))
+                     (buffer-string)))
+              (data (latex-to-svg-backend--ratex-svg raw)))
+    (let ((coding-system-for-write 'utf-8-unix)
+          (geometry (and inline (latex-to-svg-backend--svg-geometry raw))))
       (with-temp-file svg
-        (insert data)))
+        (insert (latex-to-svg-backend--mark-baseline
+                 data (and geometry
+                           (+ (nth 3 geometry) (/ (nth 5 geometry) 2.0)))))))
     t))
 
 ;;;; Compile
@@ -207,7 +223,11 @@ RaTeX emits no compile metadata, so no `.eld' sidecar is written."
     ;; Pin UTF-8, for the reason `latex-to-svg-backend--compile' gives.
     (let ((coding-system-for-write 'utf-8-unix))
       (with-temp-file input
-        (insert formula "\n")))
+        ;; An inline formula gets the strut that puts its baseline at
+        ;; the middle of the SVG.
+        (insert formula
+                (if inline (concat " " latex-to-svg-backend--ratex-strut) "")
+                "\n")))
     (latex-to-svg-backend--run-process-chain
      dir output-buffer
      (list
@@ -229,7 +249,7 @@ RaTeX emits no compile metadata, so no `.eld' sidecar is written."
        (unwind-protect
            (if (and success
                     (condition-case err
-                        (or (latex-to-svg-backend--ratex-store output svg)
+                        (or (latex-to-svg-backend--ratex-store output svg inline)
                             (progn
                               (latex-to-svg-backend--append-process-log
                                output-buffer

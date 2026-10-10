@@ -117,11 +117,39 @@ For RGB 1,2,3 it writes rgb(0.390625%, 0.782776%, 1.174927%).")
 Without `xcolor' there is no marker, and no `\\color' in a formula
 either, so black is the default ink.")
 
+(defconst latex-to-svg-backend--texres-baseline-mark
+  (concat "\\ifhmode\\ifnum\\prevgraf=0 \\pdfsavepos"
+          "\\write-1{latex-to-svg-backend-baseline"
+          " \\the\\pdflastypos\\space\\the\\pdfpageheight}\\fi\\fi\n")
+  "Text after the equation that logs the baseline of its line.
+`\\pdfsavepos' records the position, and the `\\write', which runs when
+the page is shipped out, logs its height above the page's bottom, in
+sp, with the page's height.  It is written only while `\\prevgraf' is
+0, for the reason `latex-to-svg-backend--latex-baseline-mark' gives.
+`latex-to-svg-backend--texres-baseline' reads it.")
+
+(defun latex-to-svg-backend--texres-baseline (dir)
+  "Return the baseline the compile in DIR logged, in SVG coordinates, or nil.
+See `latex-to-svg-backend--texres-baseline-mark'.  pdftocairo puts the
+page's top at y 0 and writes big points, 72.27 of them to 72pt."
+  (let ((log (expand-file-name "equation.log" dir)))
+    (when (file-exists-p log)
+      (with-temp-buffer
+        (let ((coding-system-for-read 'raw-text))
+          (insert-file-contents log))
+        (when (re-search-forward
+               "^latex-to-svg-backend-baseline \\([0-9]+\\) \\([0-9.]+\\)pt$"
+               nil t)
+          (* (- (string-to-number (match-string 2))
+                (/ (string-to-number (match-string 1)) 65536.0))
+             (/ 72 72.27)))))))
+
 (defun latex-to-svg-backend--texres-store (dir svg)
   "Write the SVG `pdftocairo' left in DIR to the cache file SVG.
 The SVG is cropped to its ink, with the marker ink as `currentColor'
-\(see `latex-to-svg-backend--crop-to-ink').  Return non-nil on
-success, nil when the output has no SVG root element."
+\(see `latex-to-svg-backend--crop-to-ink'), and gives the baseline the
+compile logged (see `latex-to-svg-backend--texres-baseline').  Return
+non-nil on success, nil when the output has no SVG root element."
   (let* ((raw (with-temp-buffer
                 (let ((coding-system-for-read 'utf-8))
                   (insert-file-contents (expand-file-name "cairo.svg" dir)))
@@ -133,7 +161,8 @@ success, nil when the output has no SVG root element."
     (when data
       (let ((coding-system-for-write 'utf-8-unix))
         (with-temp-file svg
-          (insert data)))
+          (insert (latex-to-svg-backend--mark-baseline
+                   data (latex-to-svg-backend--texres-baseline dir)))))
       t)))
 
 ;;;; Compile
@@ -152,6 +181,7 @@ does (see `latex-to-svg-backend--compile-failed')."
                      latex-to-svg-backend-texres-program)
         :output "equation.pdf"
         :prefix latex-to-svg-backend--texres-ink
+        :suffix latex-to-svg-backend--texres-baseline-mark
         :convert (lambda (dir pdf _svg)
                    (let ((out (expand-file-name "cairo.svg" dir)))
                      (list (list 'pdftocairo

@@ -8,11 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 The backend reads no faces and no frames. A front-end passes the tint and
-the font height it measured on the frame that shows its buffer.
+the font size it measured on the frame that shows its buffer. An
+equation's em is the em of the text around it, on every port, and an
+inline equation sits on the text's baseline.
+
+### Added
+
+- An inline equation's baseline is on the line's: the image's `:ascent`
+  is the share of it above the baseline TeX (or RaTeX) set the equation
+  on. Each engine records the baseline in the SVG: the LaTeX engine
+  through a dvisvgm special after the equation, texres through
+  `\pdfsavepos`, RaTeX through an invisible strut. A display equation is
+  centred, as before. Before, every image was centred on its line, so
+  `$y$` sat higher than `$x$`, and an exponent pushed its base below the
+  baseline. The approach follows `org-latex-preview` in the Org fork of
+  karthink and tecosaur.
 
 ### Changed
 
-- `:color` is required whenever `:font-height` is given; a nil `:color`
+- `:font-height` is now `:font-size`: the size of the font of the text
+  around the equation, its em in pixels, as element 2 of `query-font`
+  gives it. The equation's em is displayed at that size times
+  `latex-to-svg-backend-font-scale` and `:rescale-by`, so equation text
+  has the size of the text around it. Before, the 10pt em was mapped
+  onto the font's line height, which is larger than its em, and Emacs then
+  converted the SVG's pt at the port's resolution: on macOS (72.27 dpi)
+  equations came out at 0.75 of the line height, on X, pgtk and Windows
+  at 96 dpi at the full line height, larger than the text. A request
+  with `:font-height` signals an error.
+
+- Each image has `:width` in pixels at `:scale` 1.0, computed from its
+  SVG's width in pt, instead of `:scale` alone, so its size is the same
+  on every port. `latex-to-svg-backend-image-width` returns that
+  `:width`; with 0.13.0 it was 4/3 of the displayed width on macOS.
+
+- The cache is recompiled once: the cache version is 2, since an SVG
+  without a baseline would be centred.
+
+- `:color` is required whenever `:font-size` is given; a nil `:color`
   then signals an error. Before, a nil `:color` tinted the equation with
   the `default` face of the selected frame.
 
@@ -21,11 +54,9 @@ the font height it measured on the frame that shows its buffer.
   selected frame, a `:color` that did not resolve became black, and a
   `:background` that did not resolve went into the SVG unchanged.
 
-- A nil `:font-height` means the buffer is shown nowhere: the backend
+- A nil `:font-size` means the buffer is shown nowhere: the backend
   compiles and caches the SVG and returns nil. Before, it measured the
   selected frame when that frame was graphical.
-  `latex-to-svg-backend-display-scale` returns nil without a
-  `font-height` for the same reason.
 
 - In an Emacs that cannot display SVG images (built without librsvg), a
   request warns once per session, even with `:quiet`, and returns nil;
@@ -33,6 +64,10 @@ the font height it measured on the frame that shows its buffer.
   warning.
 
 ### Deprecated
+
+- `latex-to-svg-backend-svg-dpi` has no effect, and a value other than
+  96.0 is reported once per session: an image's `:width` does not depend
+  on the resolution. `latex-to-svg-backend-font-scale` changes the size.
 
 - `latex-to-svg-backend-render-on-non-graphic` has no effect, and a
   non-nil value is reported once per session.
@@ -45,6 +80,9 @@ the font height it measured on the frame that shows its buffer.
   that workflow.
 
 ### Removed
+
+- `latex-to-svg-backend-display-scale`. An image's size is its `:width`;
+  `latex-to-svg-backend-image-width` returns it.
 
 - `latex-to-svg-backend-appearance`. A front-end builds its own
   signature from the values it passes.
