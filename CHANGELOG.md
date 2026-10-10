@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-10
+
 ### Added
 
 - `latex-to-svg-backend-image-width`: the width in pixels at which an
@@ -500,7 +502,8 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
-[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.0...v0.11.1
