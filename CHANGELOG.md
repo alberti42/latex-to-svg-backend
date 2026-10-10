@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-10
+
 The backend reads no faces and no frames. A front-end passes the tint and
 the x-height it measured on the frame that shows its buffer. An
 equation's lowercase letters are as tall as the text's around it, on
@@ -593,7 +595,8 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
-[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.11.1...v0.12.0
