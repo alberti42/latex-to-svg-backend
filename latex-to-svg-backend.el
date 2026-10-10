@@ -458,6 +458,7 @@ Call within the target buffer: the engines read their options there (see
   (latex-to-svg-backend--hex-color background :background)
   (when (and font-height (null color))
     (error "Missing :color: required with :font-height"))
+  (latex-to-svg-backend--report-obsolete-options)
   (if (not (latex-to-svg-backend-available-p))
       (latex-to-svg-backend--report-no-svg)
     (let* ((inputs (latex-to-svg-backend--inputs))

@@ -117,6 +117,26 @@
             ((symbol-function 'image-type-available-p) #'ignore))
     (should-not (latex-to-svg-backend-available-p))))
 
+(ert-deftest latex-to-svg-backend-warns-once-of-the-obsolete-option ()
+  ;; `-render-on-non-graphic' has no effect since 0.14.0; set, it is
+  ;; reported once per session, and a request still goes ahead.
+  (let ((latex-to-svg-backend--warned (make-hash-table :test 'equal))
+        (warnings nil))
+    (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) #'ignore)
+              ((symbol-function 'display-warning)
+               (lambda (_type message &rest _) (push message warnings))))
+      (with-suppressed-warnings
+          ((obsolete latex-to-svg-backend-render-on-non-graphic))
+        (let ((latex-to-svg-backend-render-on-non-graphic nil))
+          (latex-to-svg-backend "$x$")
+          (should-not (seq-some (lambda (m) (string-search "obsolete" m))
+                                warnings)))
+        (let ((latex-to-svg-backend-render-on-non-graphic t))
+          (latex-to-svg-backend "$x$")
+          (latex-to-svg-backend "$y$")))
+      (should (= 1 (seq-count (lambda (m) (string-search "obsolete" m))
+                              warnings))))))
+
 ;;;; Scale
 
 (ert-deftest latex-to-svg-backend-display-scale-nil-when-height-unknown ()

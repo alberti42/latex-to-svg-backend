@@ -32,18 +32,23 @@ the font height it measured on the frame that shows its buffer.
   the LaTeX source stays in the buffer. Before, it returned nil with no
   warning.
 
+### Deprecated
+
+- `latex-to-svg-backend-render-on-non-graphic` has no effect, and a
+  non-nil value is reported once per session.
+  `latex-to-svg-backend-available-p` now checks only that this Emacs can
+  display SVG images; it no longer requires a graphical selected frame.
+  Whether to request a render for a buffer shown only on a terminal is
+  the front-end's decision, with an option of its own:
+  `latex-to-svg-frontend-render-on-non-graphic`,
+  `agent-shell-math-renderer-render-on-non-graphic`.
+
 ### Removed
 
 - `latex-to-svg-backend-appearance`. A front-end builds its own
   signature from the values it passes.
 
 - `latex-to-svg-backend-foreground-color`.
-
-- `latex-to-svg-backend-render-on-non-graphic`.
-  `latex-to-svg-backend-available-p` now checks only that this Emacs can
-  display SVG images; it no longer requires a graphical selected frame.
-  Whether to request a render for a buffer shown only on a terminal is
-  the front-end's decision.
 
 - `latex-to-svg-backend-use-placeholder` and the placeholder panel. For an
   equation the backend returns nil for, the front-end shows its LaTeX

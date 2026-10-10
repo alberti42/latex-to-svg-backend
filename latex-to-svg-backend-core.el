@@ -96,6 +96,22 @@ buffer font across themes, faces, and text scale."
   :safe #'numberp
   :group 'latex-to-svg-backend)
 
+(defcustom latex-to-svg-backend-render-on-non-graphic nil
+  "Obsolete since 0.14.0, and without effect.
+Whether to render equations for a buffer shown only on a terminal is
+the front-end's decision, since only the front-end knows which frame
+shows the buffer: set `latex-to-svg-frontend-render-on-non-graphic' or
+`agent-shell-math-renderer-render-on-non-graphic' instead.  A non-nil
+value is reported once per session."
+  :type 'boolean
+  :safe #'booleanp
+  :group 'latex-to-svg-backend)
+
+(make-obsolete-variable
+ 'latex-to-svg-backend-render-on-non-graphic
+ "set the option of the front-end instead, such as \=`latex-to-svg-frontend-render-on-non-graphic'."
+ "0.14.0")
+
 (defcustom latex-to-svg-backend-svg-dpi 96.0
   "Dots-per-inch Emacs's SVG renderer uses to convert points to pixels.
 
@@ -278,6 +294,24 @@ quiet request: it is a configuration problem, not the formula's."
 Equations stay as LaTeX source."
      :warning))
   nil)
+
+(defun latex-to-svg-backend--report-obsolete-options ()
+  "Warn that an obsolete option without effect is set.
+Once per session (see `latex-to-svg-backend--mark-once'): the option
+is read on every request."
+  (when (and (with-suppressed-warnings
+                 ((obsolete latex-to-svg-backend-render-on-non-graphic))
+               latex-to-svg-backend-render-on-non-graphic)
+             (latex-to-svg-backend--mark-once
+              "obsolete option/render-on-non-graphic"))
+    (display-warning
+     'latex-to-svg-backend
+     "`latex-to-svg-backend-render-on-non-graphic' is obsolete since 0.14.0 \
+and has no effect.
+Set the option of the front-end instead, such as \
+`latex-to-svg-frontend-render-on-non-graphic' or \
+`agent-shell-math-renderer-render-on-non-graphic'."
+     :warning)))
 
 ;;;; Cache addressing
 
