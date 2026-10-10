@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 The backend reads no faces and no frames. A front-end passes the tint and
-the font size it measured on the frame that shows its buffer. An
-equation's em is the em of the text around it, on every port, and an
-inline equation sits on the text's baseline.
+the x-height it measured on the frame that shows its buffer. An
+equation's lowercase letters are as tall as the text's around it, on
+every port, and an inline equation sits on the text's baseline.
 
 ### Added
 
@@ -26,26 +26,31 @@ inline equation sits on the text's baseline.
 
 ### Changed
 
-- `:font-height` is now `:font-size`: the size of the font of the text
-  around the equation, its em in pixels, as element 2 of `query-font`
-  gives it. The equation's em is displayed at that size times
-  `latex-to-svg-backend-font-scale` and `:rescale-by`, so equation text
-  has the size of the text around it. Before, the 10pt em was mapped
-  onto the font's line height, which is larger than its em, and Emacs then
-  converted the SVG's pt at the port's resolution: on macOS (72.27 dpi)
-  equations came out at 0.75 of the line height, on X, pgtk and Windows
-  at 96 dpi at the full line height, larger than the text. A request
-  with `:font-height` signals an error.
+- `:font-height` is now `:x-height`: the x-height of the font of the text
+  around the equation in pixels, the height of its lowercase `x`, as the
+  ascent of `x` in `font-get-glyphs` gives it. The equation's font is
+  displayed with that x-height times `latex-to-svg-backend-font-scale`
+  and `:rescale-by`, so its lowercase letters are as tall as the text's,
+  as CSS's `font-size-adjust` matches one font to another. The x-height
+  of the equation's font comes from TeX (`\fontdimen5` of the math
+  italic font), so a preamble that loads another math font is followed.
+  Matching the font size instead leaves an `n` in an equation at about
+  0.78 of an `n` in JetBrains Mono at the same size. Before, the 10pt em was
+  mapped onto the font's line height, and Emacs then converted the SVG's
+  pt at the port's resolution: on macOS (72.27 dpi) equations came out
+  at 0.75 of the line height, on X, pgtk and Windows at 96 dpi at the
+  full line height. A request with `:font-height` signals an error.
 
 - Each image has `:width` in pixels at `:scale` 1.0, computed from its
   SVG's width in pt, instead of `:scale` alone, so its size is the same
   on every port. `latex-to-svg-backend-image-width` returns that
   `:width`; with 0.13.0 it was 4/3 of the displayed width on macOS.
 
-- The cache is recompiled once: the cache version is 2, since an SVG
-  without a baseline would be centred.
+- The cache is recompiled once: the cache version is 3, since an SVG
+  without a baseline would be centred, and one without the x-height of
+  its font cannot be sized.
 
-- `:color` is required whenever `:font-size` is given; a nil `:color`
+- `:color` is required whenever `:x-height` is given; a nil `:color`
   then signals an error. Before, a nil `:color` tinted the equation with
   the `default` face of the selected frame.
 
@@ -54,7 +59,7 @@ inline equation sits on the text's baseline.
   selected frame, a `:color` that did not resolve became black, and a
   `:background` that did not resolve went into the SVG unchanged.
 
-- A nil `:font-size` means the buffer is shown nowhere: the backend
+- A nil `:x-height` means the buffer is shown nowhere: the backend
   compiles and caches the SVG and returns nil. Before, it measured the
   selected frame when that frame was graphical.
 

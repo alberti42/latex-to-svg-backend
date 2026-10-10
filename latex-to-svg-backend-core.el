@@ -84,12 +84,13 @@ can always be invoked by hand."
   :group 'latex-to-svg-backend)
 
 (defcustom latex-to-svg-backend-font-scale 1.0
-  "Size of rendered equations relative to the font of the text around them.
+  "Size of rendered equations relative to the text around them.
 
-Equation images are scaled so the em of LaTeX's 10pt body font is the
-em of that font, the font size the front-end passes; this multiplier
-rides on top of that match.  1.0 makes equation text the same size as
-the surrounding text; greater than 1 enlarges, less than 1 shrinks.
+Equation images are scaled so the x-height of the equation's font, the
+height of its lowercase `x', is the x-height of the font of the text
+around it, which the front-end passes; this multiplier rides on top of
+that match.  1.0 makes the equation's lowercase letters as tall as the
+text's; greater than 1 enlarges, less than 1 shrinks.
 Because the match is recomputed from the font on each render,
 equations track it across themes, faces, and text scale."
   :type 'number
@@ -433,17 +434,49 @@ See `latex-to-svg-backend--baseline-comment'."
                       svg)
     (string-to-number (match-string 1 svg))))
 
+(defun latex-to-svg-backend--mark-svg (svg comment value)
+  "Return SVG with COMMENT, formatted with VALUE, after the root tag.
+SVG is returned unchanged when VALUE is nil or SVG has no root element."
+  (if-let* ((value)
+            (root (latex-to-svg-backend--svg-root svg)))
+      (concat (substring svg 0 (cdr root))
+              (format comment (format "%.6f" value))
+              (substring svg (cdr root)))
+    svg))
+
 (defun latex-to-svg-backend--mark-baseline (svg y)
   "Return SVG with the comment giving its baseline Y after the root tag.
 See `latex-to-svg-backend--baseline-comment'.  SVG is returned unchanged
 when Y is nil or SVG has no root element."
-  (if-let* ((y)
-            (root (latex-to-svg-backend--svg-root svg)))
-      (concat (substring svg 0 (cdr root))
-              (format latex-to-svg-backend--baseline-comment
-                      (format "%.6f" y))
-              (substring svg (cdr root)))
-    svg))
+  (latex-to-svg-backend--mark-svg
+   svg latex-to-svg-backend--baseline-comment y))
+
+;;;; X-height
+
+(defconst latex-to-svg-backend--x-height-comment
+  "<!--latex-to-svg-backend-x-height %s-->"
+  "Format of the comment that gives the x-height of an SVG's font.
+Its argument is the x-height of the font the equation is set in, in
+the SVG's units: the LaTeX engines write `\\fontdimen5' of the math
+italic font (see `latex-to-svg-backend--latex-x-height-mark'), so a
+preamble that loads another math font is followed; RaTeX writes its
+font's (see `latex-to-svg-backend--ratex-x-height').  Every cache SVG
+has it, display equations too.")
+
+(defun latex-to-svg-backend--svg-x-height (svg)
+  "Return the x-height SVG gives for its font, in its units, or nil.
+See `latex-to-svg-backend--x-height-comment'.  The value may carry a
+`pt' unit, as TeX writes it."
+  (when (string-match
+         "<!--latex-to-svg-backend-x-height \\([0-9.]+\\)\\(?:pt\\)?-->" svg)
+    (let ((value (string-to-number (match-string 1 svg))))
+      (and (> value 0) value))))
+
+(defun latex-to-svg-backend--mark-x-height (svg x-height)
+  "Return SVG with the comment giving its font's X-HEIGHT after the root tag.
+See `latex-to-svg-backend--x-height-comment'."
+  (latex-to-svg-backend--mark-svg
+   svg latex-to-svg-backend--x-height-comment x-height))
 
 (defun latex-to-svg-backend--svg-geometry (svg)
   "Return SVG's root geometry as (WIDTH HEIGHT X Y W H), or nil.
@@ -491,31 +524,24 @@ the image is cropped to its ink."
 
 ;;;; Scale
 
-(defconst latex-to-svg-backend--em 9.96264
-  "The em of an equation's body font, in SVG pt.
-The LaTeX engines typeset at 10pt, and dvisvgm and pdftocairo write
-the SVG in big points (1/72 in), of which 10pt is 9.96264.  RaTeX
-writes its 10pt em as 10 units, so its equations come out 0.37%
-larger, less than a tenth of a pixel at any font size.")
-
-(defun latex-to-svg-backend--px-per-pt (font-size &optional rescale-by)
-  "Return how many pixels one SVG pt is displayed as, or nil.
-FONT-SIZE is the em of the font of the text around the equation, in
-pixels.  The equation's em is displayed at FONT-SIZE times
-`latex-to-svg-backend-font-scale' and RESCALE-BY (default 1.0), a
-front-end's per-call multiplier, so at 1.0 equation text has the size
-of the text around it.  Nil when FONT-SIZE is nil: the buffer is shown
-nowhere, and the caller builds the image once it is shown -- the
-on-disk SVG is size-independent, so it can be compiled now and sized
-later with no recompile.
+(defun latex-to-svg-backend--target-x-height (x-height &optional rescale-by)
+  "Return the x-height in pixels an equation is displayed at, or nil.
+X-HEIGHT is the x-height of the font of the text around the equation,
+in pixels, the height of its lowercase `x'.  The equation's font is
+displayed with that x-height times `latex-to-svg-backend-font-scale'
+and RESCALE-BY (default 1.0), a front-end's per-call multiplier, so at
+1.0 the equation's lowercase letters have the height of the text's,
+as CSS's `font-size-adjust' matches two fonts.  Nil when X-HEIGHT is
+nil: the buffer is shown nowhere, and the caller builds the image once
+it is shown -- the on-disk SVG is size-independent, so it can be
+compiled now and sized later with no recompile.
 
 Computed, not measured: an image is given its width in pixels (see
 `latex-to-svg-backend--load-svg-image'), so neither the resolution at
 which Emacs converts an SVG's pt to pixels, which differs between
 ports, nor `image-size' enters the size."
-  (when font-size
-    (/ (* font-size latex-to-svg-backend-font-scale (or rescale-by 1.0))
-       latex-to-svg-backend--em)))
+  (when x-height
+    (* x-height latex-to-svg-backend-font-scale (or rescale-by 1.0))))
 
 (defun latex-to-svg-backend-image-width (image)
   "Return the width in pixels at which IMAGE is displayed, or nil.
@@ -598,15 +624,17 @@ padding request)."
                 (substring data (cdr root))))
     data))
 
-(defun latex-to-svg-backend--load-svg-image (file px-per-pt &optional color background padding)
-  "Return an SVG image from FILE, tinted COLOR and sized by PX-PER-PT.
+(defun latex-to-svg-backend--load-svg-image (file x-height &optional color background padding)
+  "Return an SVG image from FILE, tinted COLOR, its font's x-height X-HEIGHT.
 The on-disk SVG emits its default ink as the literal token
 `currentColor' (dvisvgm `--currentcolor'); when COLOR (a `#rrggbb'
 string) is given it is substituted in, so the equation takes that
-color without recompiling.  The image has `:width' the SVG's width in
-pt times PX-PER-PT (see `latex-to-svg-backend--px-per-pt'), rounded,
-at `:scale' 1.0: `create-image' applies `image-scaling-factor' only
-when `:scale' is not given.  Its `:ascent' puts the equation's
+color without recompiling.  The image has `:width' the SVG's width
+times X-HEIGHT, in pixels (see `latex-to-svg-backend--target-x-height'),
+over the x-height the SVG gives for its font (see
+`latex-to-svg-backend--svg-x-height'), rounded, at `:scale' 1.0:
+`create-image' applies `image-scaling-factor' only when `:scale' is not
+given.  Its `:ascent' puts the equation's
 baseline on the line's (see `latex-to-svg-backend--ascent').
 
 The SVG is transparent; BACKGROUND, when non-nil (a `#rrggbb' string),
@@ -628,51 +656,54 @@ BACKGROUND is applied as `create-image' `:background'."
       (setq data (latex-to-svg-backend--pad-svg data pad background)))
     (apply #'create-image data 'svg t
            :scale 1.0
-           :width (max 1 (round (* (or (car (latex-to-svg-backend--svg-geometry
-                                                 data))
-                                            (error "No width in pt in %s" file))
-                                        px-per-pt)))
+           :width (max 1 (round (/ (* (or (car (latex-to-svg-backend--svg-geometry
+                                                    data))
+                                               (error "No width in pt in %s" file))
+                                           x-height)
+                                        (or (latex-to-svg-backend--svg-x-height data)
+                                            (error "No x-height in %s" file)))))
            :ascent (latex-to-svg-backend--ascent data)
            ;; With padding the box is a baked-in <rect>; otherwise let
            ;; `create-image' composite the background behind the SVG.
            (and background (not pad) (list :background background)))))
 
-(defun latex-to-svg-backend--image-cache-key (key px-per-pt color &optional background padding)
-  "Return the image-cache key for KEY at PX-PER-PT, COLOR, BACKGROUND, PADDING.
+(defun latex-to-svg-backend--image-cache-key (key x-height color &optional background padding)
+  "Return the image-cache key for KEY at X-HEIGHT, COLOR, BACKGROUND, PADDING.
 PADDING should be normalized (`latex-to-svg-backend--pad-box') before it
 is keyed on, so that 6 and (6 6 6 6) name one entry rather than two.
 KEY names the font- and color-independent on-disk SVG; the cached
-image object bakes in a display size, PX-PER-PT, a tint COLOR, an optional
+image object bakes in a display size, X-HEIGHT, a tint COLOR, an optional
 BACKGROUND box, and its PADDING, so the in-memory key adds all four.
 Images at different font sizes, tints, box colors, or paddings coexist,
 so any such change just creates a new entry — no cache clearing, and a
 sibling buffer's warm images survive."
-  (format "%s@%s@%s@%s@%s" key px-per-pt color background padding))
+  (format "%s@%s@%s@%s@%s" key x-height color background padding))
 
-(defun latex-to-svg-backend--cached-image (key &optional rescale-by color background padding font-size)
-  "Return the rendered image for content KEY at FONT-SIZE and COLOR.
+(defun latex-to-svg-backend--cached-image (key &optional rescale-by color background padding x-height)
+  "Return the rendered image for content KEY at X-HEIGHT and COLOR.
 Checks the in-memory cache (keyed by KEY, the display size, the tint
 color, the box background, and PADDING via
 `latex-to-svg-backend--image-cache-key', so each variant has its own image),
 else loads KEY's on-disk SVG and caches a freshly sized, tinted image.
-FONT-SIZE (the em of the text around the equation, in pixels, measured
-by the caller) and RESCALE-BY (default 1.0) give the display size (see
-`latex-to-svg-backend--px-per-pt'), which feeds the cache key, so
+X-HEIGHT (the x-height of the font of the text around the equation, in
+pixels, measured by the caller) and RESCALE-BY (default 1.0) give the
+display size (see `latex-to-svg-backend--target-x-height'), which feeds
+the cache key, so
 different sizes of the same equation coexist.  COLOR (a `#rrggbb'
 string) is the tint.  BACKGROUND (a `#rrggbb' string) paints a box
 behind the equation; nil keeps it transparent.  PADDING (pt) grows the
 BACKGROUND box beyond the ink.  All apply at display time only -- same
 on-disk SVG, no recompile -- and fold into the cache key so variants
 coexist.  Returns nil when the SVG isn't on disk yet (its compile
-hasn't finished) or FONT-SIZE is nil: the buffer is shown nowhere, so
+hasn't finished) or X-HEIGHT is nil: the buffer is shown nowhere, so
 the caller builds the image once it is shown."
-  (when-let* ((px-per-pt (latex-to-svg-backend--px-per-pt font-size rescale-by)))
+  (when-let* ((target (latex-to-svg-backend--target-x-height x-height rescale-by)))
     (let* (;; Normalize the padding spec once: the cache key is built from it
            ;; too, and 6 and (6 6 6 6) are the same box -- they must not
            ;; occupy two entries.
            (padding (latex-to-svg-backend--pad-box padding))
            (image-key (latex-to-svg-backend--image-cache-key
-                       key px-per-pt color background padding)))
+                       key target color background padding)))
       (or (gethash image-key latex-to-svg-backend--image-cache)
           (let ((file (latex-to-svg-backend--svg-file key)))
             (when (file-exists-p file)
@@ -686,7 +717,7 @@ the caller builds the image once it is shown."
                     (latex-to-svg-backend--touch file)
                     (puthash image-key
                              (latex-to-svg-backend--load-svg-image
-                              file px-per-pt color background padding)
+                              file target color background padding)
                              latex-to-svg-backend--image-cache))
                 (file-missing
                  (latex-to-svg-backend--warn-once

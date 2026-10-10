@@ -645,6 +645,25 @@ has no baseline, and is centred on its line (see
 `latex-to-svg-backend--ascent').  Inline math sits on the baseline of
 the last line of its paragraph, as text does.")
 
+(defconst latex-to-svg-backend--latex-x-height-tex
+  (concat "\\dimen0=\\fontdimen5\\textfont1 "
+          "\\ifdim\\dimen0=0pt \\dimen0=\\fontdimen5\\font\\fi "
+          "\\dimen0=\\dimexpr\\dimen0*7200/7227\\relax ")
+  "TeX that sets `\\dimen0' to the x-height of the equation's font, in bp.
+That is `\\fontdimen5' of the math italic font at text size, the font
+the variables of an equation are set in, or of the current font when
+the body set no math.  It is converted to big points, the unit of
+dvisvgm's and pdftocairo's SVGs.  Run inside a group.")
+
+(defconst latex-to-svg-backend--latex-x-height-mark
+  (concat "\\begingroup" latex-to-svg-backend--latex-x-height-tex
+          "\\special{dvisvgm:raw "
+          (format latex-to-svg-backend--x-height-comment "\\the\\dimen0")
+          "}\\endgroup\n")
+  "Text after the equation that writes its font's x-height into the SVG.
+See `latex-to-svg-backend--x-height-comment'.  Unlike the baseline, it
+is written for display equations too: every image is sized by it.")
+
 (defun latex-to-svg-backend--latex-toolchain ()
   "Return the toolchain of the LaTeX engine: `latex', then `dvisvgm'.
 A toolchain is the plist `latex-to-svg-backend--compile' runs:
@@ -667,14 +686,16 @@ scale 1: the SVG is vector (glyphs are outline paths via --no-fonts),
 so the scale doesn't affect quality, and the displayed size is set
 later by `latex-to-svg-backend-display-scale'.  `--currentcolor'
 rewrites the default ink to the `currentColor' token, so the file is
-color-independent (tinted at display time).  The suffix
-`latex-to-svg-backend--latex-baseline-mark' has dvisvgm write the
-baseline of an inline equation into the SVG."
+color-independent (tinted at display time).  The suffix has dvisvgm
+write the baseline of an inline equation into the SVG
+\(`latex-to-svg-backend--latex-baseline-mark') and the x-height of the
+equation's font (`latex-to-svg-backend--latex-x-height-mark')."
   (list :engine 'latex
         :program nil
         :output "equation.dvi"
         :prefix ""
-        :suffix latex-to-svg-backend--latex-baseline-mark
+        :suffix (concat latex-to-svg-backend--latex-baseline-mark
+                        latex-to-svg-backend--latex-x-height-mark)
         :convert (lambda (_dir dvi svg)
                    (list
                     (list 'dvisvgm

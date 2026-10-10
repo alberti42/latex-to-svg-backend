@@ -15,7 +15,7 @@ Equations are compiled once and then recolored and rescaled **without recompilin
 
 - **Each equation compiles once.** The cache file is named after the equation itself (the SHA-1 of the LaTeX, the preamble and the style), so identical input always finds its own file and the cache is shared across every front-end and buffer.
 - **Color-independent SVG.** The default ink is the literal token `currentColor` in the SVG (`dvisvgm --currentcolor` writes it; for RaTeX the backend replaces a marker color with it), substituted with the caller's `:color` at display time. A theme switch re-tints from cache — no recompile. The image background is transparent, so it always matches the buffer.
-- **Size-independent SVG.** Every engine compiles at a 10pt em (`dvisvgm --scale=1`; RaTeX `--font-size 40 --dpr 0.25`), with glyphs as outline paths. At display time the image is given its width in pixels, so the equation's em is the em of the text around it, and equations track the font — also here no recompile. See [Size and baseline](#size-and-baseline).
+- **Size-independent SVG.** Every engine compiles at a 10pt em (`dvisvgm --scale=1`; RaTeX `--font-size 40 --dpr 0.25`), with glyphs as outline paths. At display time the image is given its width in pixels, so the equation's lowercase letters are as tall as the text's around it, and equations track the font — also here no recompile. See [Size and baseline](#size-and-baseline).
 - **In-memory image cache.** On top of the on-disk SVG cache, each ready-to-display image (the SVG already tinted and scaled for the current buffer) is memoized for the session, keyed by content + color + scale. Re-showing an equation you've already displayed — revisiting a buffer, scrolling back, a redisplay — is then an instant hash lookup, with no disk read and no recompile. Sizes and colors coexist as separate entries, so a font or theme change just adds one.
 
 ## Related packages
@@ -169,7 +169,7 @@ In a running Emacs, load `dev/latex-to-svg-backend-benchmark.el` and call `M-x l
 ## API
 
 ```elisp
-(latex-to-svg-backend LATEX &key callback metadata engine fallback quiet rescale-by color background padding font-size)
+(latex-to-svg-backend LATEX &key callback metadata engine fallback quiet rescale-by color background padding x-height)
 ```
 
 `LATEX` is placed **verbatim** in the LaTeX document body, so pass valid body LaTeX — math with its delimiters (`$x$`, `\(x\)`, `\[x\]`) or a full environment (`\begin{equation}…\end{equation}`). The delimiters also decide inline vs display sizing; the backend is deliberately unaware of that distinction (a front-end that has bare bodies wraps them itself). Equation numbering, if a front-end wants it, is just a `\setcounter{equation}{N}` prepended to the body — it folds into the content hash for free.
@@ -180,7 +180,7 @@ Returns an image now when one can be produced synchronously (cache / on-disk SVG
 
 `RESCALE-BY` (default `1.0`) multiplies the display size of this one call on top of `latex-to-svg-backend-font-scale`. The backend has no inline/display awareness, so a front-end that wants display equations a touch larger than inline passes, say, `:rescale-by 1.1` for display and nothing for inline. It is a display-time scale only — same on-disk SVG, no recompile — and folds into the in-memory image cache key, so both sizes coexist. `METADATA` is documented under [Compile metadata](#compile-metadata-eld-sidecar) below.
 
-`COLOR` is the tint and `BACKGROUND` the box color, both `#rrggbb` strings. `COLOR` is required whenever `FONT-SIZE` is given; `BACKGROUND` defaults to `nil` = transparent, so equations blend into the buffer. The backend resolves no color names and reads no faces: a name resolves on a frame, and only the front-end knows which frame shows its buffer, so it resolves the color there. A `COLOR` or `BACKGROUND` in any other form signals an error. `PADDING` grows the `BACKGROUND` box beyond the ink — the SVG viewport is enlarged and a filled `<rect>` baked in — and scales with the equation; `nil` / `0` crops the box to the ink. It is either a number of pt, applied to all four sides, or a list of one to four numbers read in **CSS order**:
+`COLOR` is the tint and `BACKGROUND` the box color, both `#rrggbb` strings. `COLOR` is required whenever `X-HEIGHT` is given; `BACKGROUND` defaults to `nil` = transparent, so equations blend into the buffer. The backend resolves no color names and reads no faces: a name resolves on a frame, and only the front-end knows which frame shows its buffer, so it resolves the color there. A `COLOR` or `BACKGROUND` in any other form signals an error. `PADDING` grows the `BACKGROUND` box beyond the ink — the SVG viewport is enlarged and a filled `<rect>` baked in — and scales with the equation; `nil` / `0` crops the box to the ink. It is either a number of pt, applied to all four sides, or a list of one to four numbers read in **CSS order**:
 
 | Spec | Sides |
 | --- | --- |
@@ -191,7 +191,7 @@ Returns an image now when one can be produced synchronously (cache / on-disk SVG
 
 So a left gutter and nothing else is `:padding '(0 0 0 6)`. Each dimension grows by the sum of its two sides and the origin shifts by the left/top ones, so the ink stays put relative to the sides that were not padded. A malformed spec (wrong length, a non-number, a negative side) signals an error rather than silently rendering an unpadded box. Like `RESCALE-BY` they apply at display time only — same on-disk SVG, no recompile — and fold into the image cache key so variants coexist. A front-end owns any user-facing “fixed color” / “boxed equation” preference and passes it here.
 
-`FONT-SIZE` (pixels) is the size of the font of the text around the equation: its em, the pixel size Emacs opened it at. The front-end reads it on the frame that shows the buffer, for example as element 2 of `query-font` on the `font-at` the equation, and passes it; see [Size and baseline](#size-and-baseline). Anything but `nil` or a positive number signals an error. `nil` means the buffer is shown nowhere: the backend still ensures the size-independent SVG is compiled and cached, but returns `nil` and measures nothing. The front-end re-queries once the buffer is shown, and the image is built then, from cache, with no recompile. The `latex` → `dvisvgm` **compile** never needs a frame; only building the display image does.
+`X-HEIGHT` (pixels) is the x-height of the font of the text around the equation, the height of its lowercase `x`. The front-end reads it on the frame that shows the buffer, for example as the ascent of `x` that `font-get-glyphs` gives for the `font-at` the equation, and passes it; see [Size and baseline](#size-and-baseline). Anything but `nil` or a positive number signals an error. `nil` means the buffer is shown nowhere: the backend still ensures the size-independent SVG is compiled and cached, but returns `nil` and measures nothing. The front-end re-queries once the buffer is shown, and the image is built then, from cache, with no recompile. The `latex` → `dvisvgm` **compile** never needs a frame; only building the display image does.
 
 Call it within the target buffer: the engines read their options there, so a buffer-local value applies to that buffer's equations.
 
@@ -208,9 +208,11 @@ Helpers a front-end typically needs for its refresh policy:
 
 ### Size and baseline
 
-**Size.** The image of an equation gets `:width` W pixels at `:scale 1.0`, with W = the SVG's width in pt × `FONT-SIZE` × `latex-to-svg-backend-font-scale` × `RESCALE-BY` / 9.96264. 9.96264 is the 10pt em in the SVG's big points, so at 1.0 the equation's em is `FONT-SIZE` pixels: α in an equation is as large as α in the text around it, as in a LaTeX document, where math has the size of the text. The height follows from the aspect ratio. Display equations follow the same rule; a front-end that wants them larger passes `RESCALE-BY`.
+**Size.** The image of an equation gets `:width` W pixels at `:scale 1.0`, with W = the SVG's width × `X-HEIGHT` × `latex-to-svg-backend-font-scale` × `RESCALE-BY` / the x-height of the equation's font. So at 1.0 the equation's lowercase letters are as tall as the text's, as CSS's `font-size-adjust` matches one font to another. Fonts of the same size draw letters of different heights: JetBrains Mono's lowercase is about 0.55 of its size, Computer Modern's 0.43, so matching the font size instead would make an `n` in an equation visibly smaller than an `n` in a monospace text. Capitals and digits come out about 10% larger than a text font's, since Computer Modern's capitals are tall for its x-height. The height follows from the aspect ratio. Display equations follow the same rule; a front-end that wants them larger passes `RESCALE-BY`.
 
-Nothing is measured, and the size is the same on every port. Emacs converts an SVG's pt to pixels at a resolution that differs between ports (72.27 dpi on macOS, 96 or the monitor's on X, pgtk and Windows); with `:width` that conversion does not enter. `FONT-SIZE` is in the port's pixels already, since Emacs converts a font's points at the same resolution.
+The x-height of the equation's font comes from TeX: each LaTeX compile writes `\fontdimen5` of the math italic font into the SVG, so a preamble that loads another math font (`newtxmath`, say) is followed. RaTeX always uses KaTeX's fonts, whose x-height is 0.431 em.
+
+Nothing is measured, and the size is the same on every port. Emacs converts an SVG's pt to pixels at a resolution that differs between ports (72.27 dpi on macOS, 96 or the monitor's on X, pgtk and Windows); with `:width` that conversion does not enter. `X-HEIGHT` is in the port's pixels already, since Emacs converts a font's points at the same resolution.
 
 **Baseline.** An inline equation's `:ascent` puts its baseline on the line's, so `$x$` and `$y$` sit on the text's baseline as letters do. Each engine records the baseline of the equation's line in the SVG, as a comment `<!--latex-to-svg-backend-baseline Y-->`: the LaTeX engine through a dvisvgm special after the equation, whose `{?y}` dvisvgm replaces with the position; texres through `\pdfsavepos`; RaTeX through an invisible strut that puts the baseline at the middle of its SVG. The `:ascent` is the share of the image above the baseline, in percent. A display equation has no baseline, since TeX sets it on a line of its own, and is centred.
 
@@ -253,7 +255,7 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
 
 ```elisp
 (defun my-appearance (buffer)
-  "Return the :color and :font-size arguments for BUFFER, or nil."
+  "Return the :color and :x-height arguments for BUFFER, or nil."
   (when-let* ((window (get-buffer-window buffer t))
               ((display-graphic-p (window-frame window))))
     (with-selected-window window
@@ -263,8 +265,11 @@ For an equation you *don't* want to track, do nothing extra: call `(latex-to-svg
                           (mapcar (lambda (v) (round (* v 255) 65535))
                                   (color-values
                                    (face-foreground 'default nil t))))
-            ;; The em of the `default' face's font, in pixels.
-            :font-size (aref (font-info (face-font 'default)) 2)))))
+            ;; The ascent of `x' in the `default' face's font, in pixels.
+            :x-height (let* ((name (face-font 'default))
+                             (font (open-font (find-font (font-spec :name name))
+                                              (aref (font-info name) 2))))
+                        (aref (aref (font-get-glyphs font 0 1 "x") 0) 7))))))
 
 (defun my-place (buffer beg end latex)   ; LATEX is valid body LaTeX
   (with-current-buffer buffer

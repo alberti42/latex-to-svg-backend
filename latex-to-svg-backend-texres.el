@@ -128,27 +128,52 @@ sp, with the page's height.  It is written only while `\\prevgraf' is
 0, for the reason `latex-to-svg-backend--latex-baseline-mark' gives.
 `latex-to-svg-backend--texres-baseline' reads it.")
 
-(defun latex-to-svg-backend--texres-baseline (dir)
-  "Return the baseline the compile in DIR logged, in SVG coordinates, or nil.
-See `latex-to-svg-backend--texres-baseline-mark'.  pdftocairo puts the
-page's top at y 0 and writes big points, 72.27 of them to 72pt."
+(defconst latex-to-svg-backend--texres-x-height-mark
+  (concat "\\begingroup" latex-to-svg-backend--latex-x-height-tex
+          "\\immediate\\write-1{latex-to-svg-backend-x-height \\the\\dimen0}"
+          "\\endgroup\n")
+  "Text after the equation that logs the x-height of its font.
+See `latex-to-svg-backend--latex-x-height-tex'; pdftocairo ignores the
+special the LaTeX engine uses, so texres logs the value, and
+`latex-to-svg-backend--texres-store' writes it into the SVG.")
+
+(defun latex-to-svg-backend--texres-log-value (dir regexp)
+  "Return the groups of REGEXP's match in the log of the compile in DIR.
+A list of the matched strings, or nil when the log has no match."
   (let ((log (expand-file-name "equation.log" dir)))
     (when (file-exists-p log)
       (with-temp-buffer
         (let ((coding-system-for-read 'raw-text))
           (insert-file-contents log))
-        (when (re-search-forward
-               "^latex-to-svg-backend-baseline \\([0-9]+\\) \\([0-9.]+\\)pt$"
-               nil t)
-          (* (- (string-to-number (match-string 2))
-                (/ (string-to-number (match-string 1)) 65536.0))
-             (/ 72 72.27)))))))
+        (when (re-search-forward regexp nil t)
+          (cl-loop for i from 1 to (/ (length (match-data)) 2)
+                   while (match-beginning i)
+                   collect (match-string i)))))))
+
+(defun latex-to-svg-backend--texres-x-height (dir)
+  "Return the x-height the compile in DIR logged, in bp, or nil.
+See `latex-to-svg-backend--texres-x-height-mark'."
+  (when-let* ((value (latex-to-svg-backend--texres-log-value
+                      dir "^latex-to-svg-backend-x-height \\([0-9.]+\\)pt$")))
+    (string-to-number (car value))))
+
+(defun latex-to-svg-backend--texres-baseline (dir)
+  "Return the baseline the compile in DIR logged, in SVG coordinates, or nil.
+See `latex-to-svg-backend--texres-baseline-mark'.  pdftocairo puts the
+page's top at y 0 and writes big points, 72.27 of them to 72pt."
+  (when-let* ((value (latex-to-svg-backend--texres-log-value
+                      dir (concat "^latex-to-svg-backend-baseline"
+                                  " \\([0-9]+\\) \\([0-9.]+\\)pt$"))))
+    (* (- (string-to-number (nth 1 value))
+          (/ (string-to-number (nth 0 value)) 65536.0))
+       (/ 72 72.27))))
 
 (defun latex-to-svg-backend--texres-store (dir svg)
   "Write the SVG `pdftocairo' left in DIR to the cache file SVG.
 The SVG is cropped to its ink, with the marker ink as `currentColor'
-\(see `latex-to-svg-backend--crop-to-ink'), and gives the baseline the
-compile logged (see `latex-to-svg-backend--texres-baseline').  Return
+\(see `latex-to-svg-backend--crop-to-ink'), and gives the baseline and
+the x-height the compile logged (see `latex-to-svg-backend--texres-baseline'
+and `latex-to-svg-backend--texres-x-height').  Return
 non-nil on success, nil when the output has no SVG root element."
   (let* ((raw (with-temp-buffer
                 (let ((coding-system-for-read 'utf-8))
@@ -161,8 +186,10 @@ non-nil on success, nil when the output has no SVG root element."
     (when data
       (let ((coding-system-for-write 'utf-8-unix))
         (with-temp-file svg
-          (insert (latex-to-svg-backend--mark-baseline
-                   data (latex-to-svg-backend--texres-baseline dir)))))
+          (insert (latex-to-svg-backend--mark-x-height
+                   (latex-to-svg-backend--mark-baseline
+                    data (latex-to-svg-backend--texres-baseline dir))
+                   (latex-to-svg-backend--texres-x-height dir)))))
       t)))
 
 ;;;; Compile
@@ -181,7 +208,8 @@ does (see `latex-to-svg-backend--compile-failed')."
                      latex-to-svg-backend-texres-program)
         :output "equation.pdf"
         :prefix latex-to-svg-backend--texres-ink
-        :suffix latex-to-svg-backend--texres-baseline-mark
+        :suffix (concat latex-to-svg-backend--texres-baseline-mark
+                        latex-to-svg-backend--texres-x-height-mark)
         :convert (lambda (dir pdf _svg)
                    (let ((out (expand-file-name "cairo.svg" dir)))
                      (list (list 'pdftocairo

@@ -58,9 +58,9 @@
 ;;
 ;;   * The on-disk SVG is SIZE-INDEPENDENT: it is compiled at dvisvgm
 ;;     `--scale=1' (natural point dimensions, glyphs as outline paths) and
-;;     given its width in pixels at display time, computed from the font
-;;     size of the text around it, so equations track the font — again no
-;;     recompile.  An inline equation's baseline sits on the line's.
+;;     given its width in pixels at display time, computed from the
+;;     x-height of the text around it, so equations track the font — again
+;;     no recompile.  An inline equation's baseline sits on the line's.
 ;;
 ;;   * The preamble is PRECOMPILED once to a LaTeX `.fmt' file with TeX's
 ;;     `\dump', then loaded by every equation compile with a `%&' first
@@ -80,7 +80,7 @@
 ;;
 ;;   (latex-to-svg-backend LATEX &key callback metadata engine fallback
 ;;                         quiet rescale-by color background padding
-;;                         font-size)
+;;                         x-height)
 ;;
 ;; LATEX is placed *verbatim* in the document body, so the caller passes
 ;; valid body LaTeX and decides inline vs display by the delimiters it uses
@@ -98,7 +98,7 @@
 ;; `latex-to-svg-backend-engine-used' says which engine drew a picture.
 ;;
 ;; The backend reads no faces and no frames.  The caller passes the
-;; tint as `:color' and the font size of the text as `:font-size', both
+;; tint as `:color' and the x-height of the text as `:x-height', both
 ;; read on the frame that shows its buffer; `:background' and `:padding'
 ;; add a box behind the equation and grow it beyond the ink -- one number
 ;; for all four sides, or a list of one to four numbers in CSS order, so a
@@ -160,7 +160,7 @@ for the RaTeX one, `texres' and `pdftocairo' for the texres one."
 
 ;;;; Cache key
 
-(defconst latex-to-svg-backend--cache-version 2
+(defconst latex-to-svg-backend--cache-version 3
   "Version number mixed into every cache file name.
 See `latex-to-svg-backend--cache-key'.
 Raise it by one when a code change makes the *old cached SVGs wrong* even
@@ -176,7 +176,9 @@ not wipe the cache.  Change it by hand, only for a real incompatibility.
 
 2 (0.14.0): an inline equation's SVG gives its baseline (see
 `latex-to-svg-backend--baseline-comment'); an older SVG has none, and
-would be centred on its line.")
+would be centred on its line.  3 (0.14.0): every SVG gives the
+x-height of its font (see `latex-to-svg-backend--x-height-comment'),
+by which it is sized.")
 
 (defun latex-to-svg-backend--inputs ()
   "Return what the engines read from the current buffer, as a plist.
@@ -350,7 +352,7 @@ differs from the others."
 
 ;;;; Public entry point
 
-(cl-defun latex-to-svg-backend (latex &key callback metadata engine fallback quiet rescale-by color background padding font-size)
+(cl-defun latex-to-svg-backend (latex &key callback metadata engine fallback quiet rescale-by color background padding x-height)
   "Return an SVG image for LATEX, or nil while it compiles.
 
 ENGINE chooses the program that typesets LATEX.  `latex' (the
@@ -405,7 +407,7 @@ same on-disk SVG, no recompile — and folds into the in-memory image cache
 key, so the two sizes coexist.
 
 COLOR is the tint, a `#rrggbb' string; it is required whenever
-FONT-SIZE is given.  The backend resolves no color names and reads no
+X-HEIGHT is given.  The backend resolves no color names and reads no
 faces: the front-end resolves the color on the frame that shows its
 buffer.  BACKGROUND paints a box color behind the otherwise transparent
 equation (a `#rrggbb' string); nil (the default) keeps it transparent
@@ -420,13 +422,16 @@ at display time only -- same on-disk SVG, no recompile -- and fold
 into the in-memory image cache key, so tinted / boxed / padded
 variants coexist.
 
-FONT-SIZE (pixels) is the size of the font of the text around the
-equation: its em, the pixel size Emacs opened it at.  The front-end
-reads it on the frame that shows the buffer, for example as element 2
-of `query-font' on the `font-at' the equation, and passes it.  The
-equation's em is displayed at FONT-SIZE times
-`latex-to-svg-backend-font-scale' and RESCALE-BY, so at 1.0 equation
-text has the size of the text around it.  The image is given that width
+X-HEIGHT (pixels) is the x-height of the font of the text around the
+equation, the height of its lowercase `x'.  The front-end reads it on
+the frame that shows the buffer, for example as the ascent of `x' in
+`font-get-glyphs' on the `font-at' the equation, and passes it.  The
+equation's font is displayed with X-HEIGHT times
+`latex-to-svg-backend-font-scale' and RESCALE-BY as its x-height, so at
+1.0 the equation's lowercase letters have the height of the text's, as
+CSS's `font-size-adjust' matches two fonts.  The x-height of the
+equation's font comes from TeX, so a preamble that loads another math
+font is followed.  The image is given that width
 in pixels, at `:scale' 1.0, and an `:ascent' that puts an inline
 equation's baseline on the line's; a display equation is centred.
 Nil means the buffer is shown nowhere: the backend still ensures the
@@ -467,11 +472,11 @@ Call within the target buffer: the engines read their options there (see
     (setq fallback nil))
   (latex-to-svg-backend--hex-color color :color)
   (latex-to-svg-backend--hex-color background :background)
-  (unless (or (null font-size) (and (numberp font-size) (> font-size 0)))
-    (error "Invalid :font-size %S: want a positive number of pixels"
-           font-size))
-  (when (and font-size (null color))
-    (error "Missing :color: required with :font-size"))
+  (unless (or (null x-height) (and (numberp x-height) (> x-height 0)))
+    (error "Invalid :x-height %S: want a positive number of pixels"
+           x-height))
+  (when (and x-height (null color))
+    (error "Missing :color: required with :x-height"))
   (latex-to-svg-backend--report-obsolete-options)
   (if (not (latex-to-svg-backend-available-p))
       (latex-to-svg-backend--report-no-svg)
@@ -480,11 +485,11 @@ Call within the target buffer: the engines read their options there (see
            (compiled (file-exists-p (latex-to-svg-backend--svg-file key)))
            (image (and compiled
                        (latex-to-svg-backend--cached-image
-                        key rescale-by color background padding font-size))))
+                        key rescale-by color background padding x-height))))
       (cond
-       ;; SVG on disk and a font size: return the display image.
+       ;; SVG on disk and an x-height: return the display image.
        (image)
-       ;; Compiled, but no font size (buffer shown nowhere): defer.
+       ;; Compiled, but no x-height (buffer shown nowhere): defer.
        ;; The caller re-renders when the buffer is displayed.
        (compiled nil)
        ;; ENGINE rejected LATEX before: do not compile it again.
@@ -501,7 +506,7 @@ Call within the target buffer: the engines read their options there (see
                         :engine fallback :quiet quiet
                         :rescale-by rescale-by :color color
                         :background background :padding padding
-                        :font-size font-size)))
+                        :x-height x-height)))
             (when image
               (latex-to-svg-backend--note-fallback key engine fallback))
             image))))

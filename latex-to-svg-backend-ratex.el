@@ -143,6 +143,13 @@ does for the LaTeX engine.  A formula's own `\\color' keeps its color.")
 (defconst latex-to-svg-backend--ratex-ink-svg "rgba(1,2,3,1)"
   "How RaTeX writes `latex-to-svg-backend--ratex-ink' in its SVG.")
 
+(defconst latex-to-svg-backend--ratex-x-height 4.31
+  "The x-height of RaTeX's math font, in the units of its SVGs.
+RaTeX sets formulas in KaTeX's fonts, whose x-height is 0.431 em, and
+writes its 10pt em as 10 units (see
+`latex-to-svg-backend--ratex-compile').  It has no preamble, so the
+value does not change.")
+
 (defconst latex-to-svg-backend--ratex-strut
   "\\vphantom{\\rule[-200pt]{0pt}{400pt}}"
   "An invisible strut appended to an inline formula.
@@ -167,8 +174,9 @@ bearings stay inside it, until the crop."
 See `latex-to-svg-backend--ratex-svg' for what changes.  INLINE non-nil
 means the formula carries `latex-to-svg-backend--ratex-strut', so the
 baseline is at the middle of OUTPUT's viewport, and the SVG gives it
-\(see `latex-to-svg-backend--baseline-comment').  Return non-nil on
-success, nil when OUTPUT has no SVG root element."
+\(see `latex-to-svg-backend--baseline-comment').  The SVG gives the
+x-height of RaTeX's font too (`latex-to-svg-backend--ratex-x-height').
+Return non-nil on success, nil when OUTPUT has no SVG root element."
   (when-let* ((raw (with-temp-buffer
                      (let ((coding-system-for-read 'utf-8))
                        (insert-file-contents output))
@@ -177,9 +185,11 @@ success, nil when OUTPUT has no SVG root element."
     (let ((coding-system-for-write 'utf-8-unix)
           (geometry (and inline (latex-to-svg-backend--svg-geometry raw))))
       (with-temp-file svg
-        (insert (latex-to-svg-backend--mark-baseline
-                 data (and geometry
-                           (+ (nth 3 geometry) (/ (nth 5 geometry) 2.0)))))))
+        (insert (latex-to-svg-backend--mark-x-height
+                 (latex-to-svg-backend--mark-baseline
+                  data (and geometry
+                            (+ (nth 3 geometry) (/ (nth 5 geometry) 2.0))))
+                 latex-to-svg-backend--ratex-x-height))))
     t))
 
 ;;;; Compile
