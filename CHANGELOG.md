@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-29
+
 ### Fixed
 
 - The texres engine cut off the right side of an equation wider than
@@ -851,7 +853,8 @@ Initial release.
 - LaTeX-to-SVG rendering engine: compile LaTeX to a color-independent SVG via
   `latex → dvisvgm`, with on-disk and in-memory caching.
 
-[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.16.2...v0.17.0
 [0.16.2]: https://github.com/alberti42/latex-to-svg-backend/compare/v0.16.1...v0.16.2

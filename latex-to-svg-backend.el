@@ -6,7 +6,7 @@
 ;; Maintainer: Andrea Alberti <a.alberti82@gmail.com>
 ;; Assisted-by: Claude:claude-opus-4-8
 ;; URL: https://github.com/alberti42/latex-to-svg-backend
-;; Version: 0.18.0
+;; Version: 0.18.1
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tex, math, images
 
@@ -124,7 +124,7 @@
 
 ;;;; Version
 
-(defconst latex-to-svg-backend-version "0.18.0"
+(defconst latex-to-svg-backend-version "0.18.1"
   "The version of the loaded backend, as in the `Version:' header.
 A front-end compares it with `version<=' to check that the backend it
 loaded has what it needs.")
