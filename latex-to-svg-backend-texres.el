@@ -161,10 +161,25 @@ texres is looked up through `latex-to-svg-backend--texres-command'."
   "Return the text the texres engine folds into the cache key.
 INPUTS is as for `latex-to-svg-backend--latex-inputs'.  The engine's
 name keeps its SVGs apart from the LaTeX engine's, which reads the same
-preamble."
-  (concat "texres\0" (latex-to-svg-backend--latex-cache-salt inputs)))
+preamble.  The \"-2\" was added with
+`latex-to-svg-backend--texres-wide-page', so an SVG cut off before it
+is compiled again."
+  (concat "texres-2\0" (latex-to-svg-backend--latex-cache-salt inputs)))
 
 ;;;; SVG
+
+(defconst latex-to-svg-backend--texres-wide-page
+  "\\makeatletter\\gdef\\sa@border@right{1000pt}\\makeatother\n"
+  "Text before the equation that widens the PDF page to the right.
+`standalone' makes the page the size of its box plus the border, and
+`pdftocairo' drops what lies outside the page, so an equation wider
+than the box (see `latex-to-svg-backend-line-width') lost its right
+side.  The border is set on the right only, and the box keeps its
+width, so a numbered equation keeps its number.
+`latex-to-svg-backend--crop-to-ink' crops the empty border away.  It
+must be `\\gdef': the body is typeset inside the class's box group,
+and the border is read after the group ends.  With a class other than
+`standalone' it defines a macro nothing reads.")
 
 (defconst latex-to-svg-backend--texres-ink
   "\\ifdefined\\definecolorset\\color[RGB]{1,2,3}\\fi\n"
@@ -279,7 +294,8 @@ start, as any missing program does (see
         :program (or (latex-to-svg-backend--texres-command)
                      latex-to-svg-backend-texres-program)
         :output "equation.pdf"
-        :prefix latex-to-svg-backend--texres-ink
+        :prefix (concat latex-to-svg-backend--texres-wide-page
+                        latex-to-svg-backend--texres-ink)
         :suffix (concat latex-to-svg-backend--texres-baseline-mark
                         latex-to-svg-backend--texres-x-height-mark)
         :convert (lambda (dir pdf)

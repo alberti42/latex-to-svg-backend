@@ -3035,6 +3035,7 @@ and one in a formula's own black.")
                                        "-halt-on-error" "equation.tex"))))
           (should (string-search
                    (concat "\\begin{document}\n"
+                           latex-to-svg-backend--texres-wide-page
                            latex-to-svg-backend--texres-ink
                            doc "\n")
                    (latex-to-svg-backend-tests--tex-source tex)))
@@ -3138,6 +3139,57 @@ and one in a formula's own black.")
                 (goto-char (point-min))
                 (should-not (re-search-forward
                              latex-to-svg-backend--texres-ink-svg nil t))))))
+      (delete-directory latex-to-svg-backend-cache-directory t))))
+
+(ert-deftest latex-to-svg-backend-texres-keeps-a-wide-equation ()
+  ;; End to end (needs LaTeX and texres): a display wider than the
+  ;; `varwidth' box overflows it; texres's SVG is as wide as LaTeX's,
+  ;; whose DVI has no page to cut it off.  Numbers on the left
+  ;; (`leqno') and `flalign' overflow to the right too.
+  (skip-unless (and (latex-to-svg-backend-tools-available-p 'latex)
+                    (latex-to-svg-backend-tools-available-p 'texres)))
+  (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-wide-e2e" t))
+         (sum (mapconcat (lambda (i) (format "a_{%d}" i))
+                         (number-sequence 1 40) " + "))
+         (docs (mapcar (lambda (template) (format template sum))
+                       '("\\[%s\\]"
+                         "\\begin{equation}%s\\end{equation}"
+                         "\\begin{align}x&=%s\\end{align}"
+                         "\\begin{multline}%s\\end{multline}"
+                         "\\begin{flalign}%s&&\\end{flalign}"
+                         "\\begin{flalign}&&%s\\end{flalign}")))
+         (base latex-to-svg-backend-preamble-base))
+    (unwind-protect
+        (cl-letf (((symbol-function 'latex-to-svg-backend-available-p) (lambda () t)))
+          (dolist (leqno '(nil t))
+            (let ((latex-to-svg-backend-preamble-base
+                   (if leqno
+                       (string-replace "border=2pt" "border=2pt,leqno" base)
+                     base)))
+              (dolist (doc docs)
+                (let ((widths
+                       (mapcar
+                        (lambda (engine)
+                          (let ((done 'pending))
+                            (latex-to-svg-backend doc :engine engine
+                                                  :callback (lambda (outcome)
+                                                              (setq done (or outcome t))))
+                            (dotimes (_ 100)
+                              (when (eq done 'pending)
+                                (accept-process-output nil 0.1)))
+                            (should (eq done t))
+                            (with-temp-buffer
+                              (insert-file-contents
+                               (latex-to-svg-backend--svg-file
+                                (latex-to-svg-backend--cache-key doc engine)))
+                              (string-to-number
+                               (latex-to-svg-backend--svg-attribute
+                                (buffer-substring (search-forward "<svg")
+                                                  (search-forward ">"))
+                                "width")))))
+                        '(latex texres))))
+                  (should (> (car widths) 400))
+                  (should (< (abs (- (car widths) (cadr widths))) 1)))))))
       (delete-directory latex-to-svg-backend-cache-directory t))))
 
 ;; Needs the programs of each engine it runs; an engine without them is

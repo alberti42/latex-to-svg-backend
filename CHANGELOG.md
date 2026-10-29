@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The texres engine cut off the right side of an equation wider than
+  the `varwidth` box (`latex-to-svg-backend-line-width`, default
+  `\linewidth` ≈ 345pt): `standalone` makes the PDF page the size of the
+  box, and `pdftocairo` drops what lies outside the page. The page now
+  has a 1000pt border on the right, which the crop to the ink removes;
+  the box keeps its width, so a numbered equation keeps its number. The
+  texres cache key changed, so every texres equation compiles once more.
+
 ## [0.18.0] - 2026-10-23
 
 ### Changed
