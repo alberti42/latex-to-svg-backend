@@ -505,28 +505,6 @@ TeX writes it next to FORMAT-FILE; the dump keeps it when it fails (see
 equation's (see `latex-to-svg-backend--log-file')."
   (concat (file-name-sans-extension format-file) ".log"))
 
-(defun latex-to-svg-backend--file-stamp (file)
-  "Return (NAME . MTIME) for FILE, or nil when it does not exist.
-NAME is FILE with the symbolic links of its last component followed
-\(`file-chase-links'), and MTIME the modification time of the file it
-names.  `file-attributes' follows the links of the directories, so
-the pair describes the file itself: the `ls-R' that Debian links into
-the tree, or the binary behind `/Library/TeX/texbin/latex'.  It costs
-a fraction of `file-truename', which resolves every component in Lisp
-and takes most of a millisecond for a TeX binary."
-  (let ((name (file-chase-links file)))
-    (when-let* ((mtime (file-attribute-modification-time
-                        (file-attributes name))))
-      (cons name mtime))))
-
-(defun latex-to-svg-backend--file-unchanged-p (entry)
-  "Return non-nil when ENTRY, a (FILE . MTIME) pair, still holds.
-That is when FILE exists and its modification time is MTIME."
-  (and (consp entry)
-       (when-let* ((mtime (file-attribute-modification-time
-                           (file-attributes (car entry)))))
-         (time-equal-p mtime (cdr entry)))))
-
 (defun latex-to-svg-backend--recorded-inputs (fls)
   "Return the absolute names of the files TeX read, from FLS.
 FLS is the file list `-recorder' makes TeX write; nil when it is
@@ -626,7 +604,9 @@ stale, and the dump writes a new stamp, and warns when it cannot (see
 (defun latex-to-svg-backend--format-fresh-p (stamp binary
                                                    &optional package-files)
   "Return non-nil when the `.fmt' file of STAMP is fresh for BINARY.
-STAMP is a plist of `latex-to-svg-backend--format-stamp'.  It is fresh
+STAMP is a plist of `latex-to-svg-backend--format-stamp', or an
+equation's failure record, which holds such a stamp (see
+`latex-to-svg-backend--record-failure').  It is fresh
 when its binary is BINARY, every file it names exists with the
 modification time it records, and its preamble package files are
 PACKAGE-FILES, the request's stamps of
@@ -643,6 +623,25 @@ is dumped again once; so is a `.fmt' file with no stamp."
                               (plist-get stamp :ls-r)))
          (latex-to-svg-backend--same-file-stamps-p
           (plist-get stamp :preamble-package-files) package-files))))
+
+(defun latex-to-svg-backend--toolchain-stamp (binary format-stamp)
+  "Return the stamp of a failed compile by the TeX BINARY.
+FORMAT-STAMP is the stamp of the `.fmt' file the compile loaded (see
+`latex-to-svg-backend--format-stamp'), nil when it loaded none.  The
+result is FORMAT-STAMP's `:binary', `:latex-fmt' and `:ls-r', which
+`latex-to-svg-backend--ensure-format' found fresh before the compile;
+without a `.fmt' file, the `:binary' of BINARY only.  It goes into the
+equation's failure record (see `latex-to-svg-backend--record-failure'),
+which a request then checks as a `.fmt' stamp (see
+`latex-to-svg-backend--format-fresh-p'): an update of TeX, or of a
+package, compiles the equation again."
+  (if format-stamp
+      (append (list :binary (plist-get format-stamp :binary))
+              (when-let* ((entry (plist-get format-stamp :latex-fmt)))
+                (list :latex-fmt entry))
+              (when-let* ((indexes (plist-get format-stamp :ls-r)))
+                (list :ls-r indexes)))
+    (and binary (latex-to-svg-backend--format-stamp binary))))
 
 (defun latex-to-svg-backend--write-format-stamp (format-file binary
                                                              &optional inputs
@@ -1127,7 +1126,9 @@ dump of the preamble failed, nothing is compiled (see
 `latex-to-svg-backend--format-failed').  A failure is
 handled by `latex-to-svg-backend--compile-failed': the log is saved,
 and when the TeX program stopped on an error in the document (see
-`latex-to-svg-backend--latex-formula-error') the failure is recorded.
+`latex-to-svg-backend--latex-formula-error') the failure is recorded,
+with the stamp of the TeX installation (see
+`latex-to-svg-backend--toolchain-stamp').
 The `.fmt' file stays: its stamp, checked before it is loaded, decides
 whether it is stale (see `latex-to-svg-backend--format-fresh-p').
 
@@ -1138,14 +1139,18 @@ A theme change therefore re-tints from cache without recompiling."
   (let* ((toolchain (or toolchain (latex-to-svg-backend--latex-toolchain)))
          (inputs (or inputs (latex-to-svg-backend--latex-inputs)))
          (preamble (plist-get inputs :preamble))
+         (program (plist-get toolchain :program))
          (format-file (latex-to-svg-backend--ensure-format
-                       preamble (plist-get toolchain :program)
-                       (plist-get inputs :package-files))))
+                       preamble program (plist-get inputs :package-files))))
     (if (eq (car-safe format-file) 'failed)
         (latex-to-svg-backend--format-failed
          key (plist-get toolchain :engine) (cdr format-file))
-      (let* ((command (latex-to-svg-backend--tex-command
-                       (plist-get toolchain :program)))
+      (let* ((command (latex-to-svg-backend--tex-command program))
+             (binary (latex-to-svg-backend--latex-binary program))
+             (format-stamp
+              (and format-file
+                   (gethash (latex-to-svg-backend--format-key preamble program)
+                            latex-to-svg-backend--format-stamps)))
              (store (plist-get toolchain :store))
              (dir (latex-to-svg-backend--scratch-dir))
              (tex (expand-file-name "equation.tex" dir))
@@ -1228,14 +1233,16 @@ A theme change therefore re-tints from cache without recompiling."
                        ;; Capture compile metadata before DIR is cleaned up.
                        (latex-to-svg-backend--write-metadata key dir metadata)
                        (latex-to-svg-backend--notify-pending key))
-                   (latex-to-svg-backend--compile-failed
-                    key latex dir
-                    (latex-to-svg-backend--process-output output-buffer)
-                    (plist-get toolchain :engine)
-                    (and (eq (car exit) 'latex)
-                         (latex-to-svg-backend--latex-formula-error
-                          dir latex offset))
-                    exit))
+                   (let ((fault (and (eq (car exit) 'latex)
+                                     (latex-to-svg-backend--latex-formula-error
+                                      dir latex offset))))
+                     (latex-to-svg-backend--compile-failed
+                      key latex dir
+                      (latex-to-svg-backend--process-output output-buffer)
+                      (plist-get toolchain :engine) fault exit
+                      (and fault
+                           (latex-to-svg-backend--toolchain-stamp
+                            binary format-stamp)))))
                (latex-to-svg-backend--compile-done key)
                (when (buffer-live-p output-buffer)
                  (kill-buffer output-buffer))

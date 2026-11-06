@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - With texres 0.7.9 or later, a failed compile's `:column` is known for a long line too, as with LaTeX.
+- A failure record holds the stamp of the engine's program (for LaTeX also of `latex.fmt` and `ls-R`), and a request honours it only while the stamp holds, so an update of the engine compiles a failed equation again. A record written by 0.18.1 or older has no stamp: its equation compiles once more.
+
+### Fixed
+
+- After an update of TeX, texres or RaTeX, an equation the old version rejected stayed failed until `latex-to-svg-backend-invalidate`, such as every equation with a `tikz` preamble under texres 0.7.8.
 
 ## [0.18.1] - 2026-10-29
 

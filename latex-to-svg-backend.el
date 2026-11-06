@@ -317,20 +317,34 @@ Make the file readable, or set `latex-to-svg-backend-cache-directory' \
 to another directory."
                   file (error-message-string err))))))))
 
-(defun latex-to-svg-backend--failed-p (key)
-  "Return non-nil when the equation of KEY has a failure record.
-KEY is a content key (see `latex-to-svg-backend--cache-key').  See
-`latex-to-svg-backend--record-failure'."
-  (plist-get (latex-to-svg-backend--sidecar key) :failed))
+(defun latex-to-svg-backend--engine-binary (engine)
+  "Return the file name of the program ENGINE typesets with, or nil.
+ENGINE is a checked engine (see `latex-to-svg-backend--engine').  It is
+the TeX program for `latex' and `texres', `render-svg' for `ratex'; nil
+when it is not found.  Read in the requesting buffer, where a compile
+reads it."
+  (pcase engine
+    ((or 'nil 'latex) (latex-to-svg-backend--latex-binary))
+    ('ratex (executable-find latex-to-svg-backend-ratex-program))
+    ('texres (executable-find latex-to-svg-backend-texres-program))))
 
 (defun latex-to-svg-backend--recorded-failure (key engine)
   "Return the failure ENGINE recorded for the equation of KEY, or nil.
 KEY is a content key (see `latex-to-svg-backend--cache-key').  The
 result is the plist of `latex-to-svg-backend--failure', of kind
-`formula', as the compile that failed gave it.  A record written before
-0.15.0 holds no message, line or column, so those are nil."
+`formula', as the compile that failed gave it.
+
+Nil when the record's stamp no longer holds: its program is not
+ENGINE's (see `latex-to-svg-backend--engine-binary'), or a file it
+names has changed, as for a `.fmt' file (see
+`latex-to-svg-backend--format-fresh-p').  The engine was updated since,
+or another one is installed, and may typeset the equation: a request
+compiles it again, and the compile replaces the record.  A record
+written by 0.18.1 or older has no stamp, so it does not hold."
   (when-let* ((record (latex-to-svg-backend--sidecar key))
-              ((plist-get record :failed)))
+              ((plist-get record :failed))
+              (binary (latex-to-svg-backend--engine-binary engine))
+              ((latex-to-svg-backend--format-fresh-p record binary)))
     (latex-to-svg-backend--failure
      'formula engine
      :message (plist-get record :message)
@@ -728,7 +742,7 @@ say which engine typeset it."
      ((file-exists-p (latex-to-svg-backend--svg-file key)) engine)
      ((and fallback
            (not (eq fallback engine))
-           (latex-to-svg-backend--failed-p key)
+           (latex-to-svg-backend--recorded-failure key engine)
            (file-exists-p (latex-to-svg-backend--svg-file
                            (latex-to-svg-backend--cache-key latex fallback))))
       fallback))))

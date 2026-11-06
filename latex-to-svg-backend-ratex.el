@@ -227,7 +227,9 @@ On success the SVG is stored in the cache (see
 is notified (see `latex-to-svg-backend--enqueue').  On failure the
 failure is handled (see `latex-to-svg-backend--compile-failed'): the log
 is saved, and when RaTeX could not parse the formula (see
-`latex-to-svg-backend--ratex-formula-error') the failure is recorded.
+`latex-to-svg-backend--ratex-formula-error') the failure is recorded,
+with the stamp of the `render-svg' binary, so an update of RaTeX
+compiles the formula again.
 The scratch directory is removed either way.
 
 RaTeX emits no compile metadata, so no `.eld' sidecar is written."
@@ -240,6 +242,7 @@ RaTeX emits no compile metadata, so no `.eld' sidecar is written."
                ;; `render-svg' numbers its outputs, from 0001.svg.
                (output (expand-file-name "0001.svg" dir))
                (svg (latex-to-svg-backend--svg-file key))
+               (binary (executable-find latex-to-svg-backend-ratex-program))
                (output-buffer (generate-new-buffer
                                (format " *latex-to-svg-backend-%s*" key))))
     ;; Pin UTF-8, for the reason `latex-to-svg-backend--compile' gives.
@@ -284,11 +287,14 @@ RaTeX emits no compile metadata, so no `.eld' sidecar is written."
                                 (error-message-string err)))
                        nil)))
                (latex-to-svg-backend--notify-pending key)
-             (let ((output (latex-to-svg-backend--process-output output-buffer)))
+             (let* ((output (latex-to-svg-backend--process-output output-buffer))
+                    (fault (latex-to-svg-backend--ratex-formula-error
+                            exit output)))
                (latex-to-svg-backend--compile-failed
-                key latex dir output 'ratex
-                (latex-to-svg-backend--ratex-formula-error exit output)
-                exit)))
+                key latex dir output 'ratex fault exit
+                (and fault binary
+                     (list :binary
+                           (latex-to-svg-backend--file-stamp binary))))))
          (latex-to-svg-backend--compile-done key)
          (when (buffer-live-p output-buffer)
            (kill-buffer output-buffer))

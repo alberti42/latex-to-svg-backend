@@ -871,10 +871,24 @@ completion event."
           ((zerop exit-status) "finished\n")
           (t (format "exited abnormally with code %d\n" exit-status)))))))
 
+(defun latex-to-svg-backend-tests--fake-programs ()
+  "Return a new directory holding empty executables named as fake programs.
+A failure record holds the stamp of the engine's program, and a request
+honours it only while `executable-find' finds that program (see
+`latex-to-svg-backend--recorded-failure')."
+  (let ((dir (make-temp-file "l2s-fake-programs" t)))
+    (dolist (name '("latex-direct" "dvisvgm-direct" "ratex-direct"))
+      (let ((file (expand-file-name name dir)))
+        (write-region "" nil file)
+        (set-file-modes file #o755)))
+    dir))
+
 (defmacro latex-to-svg-backend-tests--with-fake-processes (&rest body)
   "Run BODY with direct asynchronous processes captured as fake processes."
   (declare (indent 0) (debug t))
   `(let* ((l2s-test-cache-dir (make-temp-file "l2s-process-cache" t))
+          (l2s-test-programs (latex-to-svg-backend-tests--fake-programs))
+          (exec-path (cons l2s-test-programs exec-path))
           (latex-to-svg-backend-cache-directory l2s-test-cache-dir)
           (latex-to-svg-backend-precompile nil)
           (latex-to-svg-backend-latex-program "latex-direct")
@@ -930,6 +944,7 @@ completion event."
          (let ((buffer (plist-get (aref process 3) :buffer)))
            (when (buffer-live-p buffer)
              (kill-buffer buffer))))
+       (delete-directory l2s-test-programs t)
        (when (file-directory-p l2s-test-cache-dir)
          (delete-directory l2s-test-cache-dir t)))))
 
@@ -2096,6 +2111,15 @@ Return the SVG path."
           "Undefined control sequence: \\SI\n")
   "What `render-svg' prints for a formula it cannot parse.")
 
+(defun latex-to-svg-backend-tests--stamp (engine)
+  "Return the stamp a failure of ENGINE is recorded with, as a compile does."
+  (list :binary (latex-to-svg-backend--file-stamp
+                 (latex-to-svg-backend--engine-binary engine))))
+
+(defun latex-to-svg-backend-tests--failure-recorded-p (key)
+  "Return non-nil when KEY's `.eld' sidecar is a failure record."
+  (plist-get (latex-to-svg-backend--sidecar key) :failed))
+
 (defmacro latex-to-svg-backend-tests--with-public-api (&rest body)
   "Run BODY with fake processes and no display needed.
 A cached SVG is displayed as the symbol `image'."
@@ -2154,9 +2178,11 @@ NEWEST is a function returning the most recently started fake process."
       (should (equal (with-temp-buffer
                        (insert-file-contents (latex-to-svg-backend--meta-file key))
                        (read (current-buffer)))
-                     '(:failed t :kind formula :engine ratex
-                               :message "ParseError at position 0: Undefined control sequence: \\SI"
-                               :line nil :column nil)))
+                     (append
+                      '(:failed t :kind formula :engine ratex
+                                :message "ParseError at position 0: Undefined control sequence: \\SI"
+                                :line nil :column nil)
+                      (latex-to-svg-backend-tests--stamp 'ratex))))
       (should-not (latex-to-svg-backend-metadata doc 'ratex))
       (should (= 1 (length l2s-test-warnings)))
       ;; Known failure: no compile, no second warning in this buffer; the
@@ -2171,7 +2197,7 @@ NEWEST is a function returning the most recently started fake process."
       (should (= 1 (length l2s-test-processes)))
       (should (= 1 (length l2s-test-warnings)))
       ;; The LaTeX engine's entry is another one.
-      (should-not (latex-to-svg-backend--failed-p
+      (should-not (latex-to-svg-backend-tests--failure-recorded-p
                    (latex-to-svg-backend--cache-key doc 'latex)))
       (latex-to-svg-backend-invalidate doc 'ratex)
       (should-not (file-exists-p (latex-to-svg-backend--meta-file key)))
@@ -2216,7 +2242,7 @@ NEWEST is a function returning the most recently started fake process."
       (pcase-dolist (`(,engine ,doc ,finish ,recorded) cases)
         (latex-to-svg-backend doc :engine engine :callback #'ignore)
         (funcall finish (car l2s-test-processes))
-        (should (eq (and (latex-to-svg-backend--failed-p
+        (should (eq (and (latex-to-svg-backend-tests--failure-recorded-p
                           (latex-to-svg-backend--cache-key doc engine))
                          t)
                     (and recorded t)))
@@ -2245,7 +2271,7 @@ NEWEST is a function returning the most recently started fake process."
                                           :x-height 10 :color "#000000"
                                           :callback (lambda (_outcome) (cl-incf callbacks))))
         (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
-        (should (latex-to-svg-backend--failed-p ratex-key))
+        (should (latex-to-svg-backend-tests--failure-recorded-p ratex-key))
         ;; The same string, now compiled by LaTeX.
         (should (= 2 (length l2s-test-processes)))
         (should (equal (car (plist-get (aref (car l2s-test-processes) 3) :command))
@@ -2314,7 +2340,7 @@ NEWEST is a function returning the most recently started fake process."
                                         :callback #'ignore))
       (should (= 1 (funcall missing)))
       (should (= 1 (length l2s-test-warnings)))
-      (should-not (latex-to-svg-backend--failed-p
+      (should-not (latex-to-svg-backend-tests--failure-recorded-p
                    (latex-to-svg-backend--cache-key "$x$" 'ratex)))
       (should-not latex-to-svg-backend--running)
       (should-not (latex-to-svg-backend "$y$" :engine 'ratex :callback #'ignore))
@@ -2357,7 +2383,7 @@ NEWEST is a function returning the most recently started fake process."
     (latex-to-svg-backend "$\\SI{1}{m}$" :engine 'ratex :fallback 'latex
                           :callback #'ignore)
     (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
-    (should (latex-to-svg-backend--failed-p
+    (should (latex-to-svg-backend-tests--failure-recorded-p
              (latex-to-svg-backend--cache-key "$\\SI{1}{m}$" 'ratex)))
     (should (= 1 (length l2s-test-warnings)))
     (should (string-match-p "The LaTeX engine could not run `latex-direct'"
@@ -2672,7 +2698,7 @@ LINE of LATEX counted in the source the compile wrote."
       (should (equal (seq-take (car outcomes) 6)
                      '(:kind setup :engine ratex
                              :message "The RaTeX engine failed: ratex exited with status 134")))
-      (should-not (latex-to-svg-backend--failed-p
+      (should-not (latex-to-svg-backend-tests--failure-recorded-p
                    (latex-to-svg-backend--cache-key "$a$" 'ratex)))
       (setq outcomes nil
             l2s-test-missing '("ratex-direct"))
@@ -2718,7 +2744,8 @@ LINE of LATEX counted in the source the compile wrote."
     (let ((record (lambda (doc engine message)
                     (latex-to-svg-backend--record-failure
                      (latex-to-svg-backend--cache-key doc engine)
-                     (latex-to-svg-backend--failure 'formula engine :message message))))
+                     (latex-to-svg-backend--failure 'formula engine :message message)
+                     (latex-to-svg-backend-tests--stamp engine))))
           (svg (lambda (doc engine)
                  (with-temp-file (latex-to-svg-backend--svg-file
                                   (latex-to-svg-backend--cache-key doc engine))
@@ -2755,7 +2782,8 @@ LINE of LATEX counted in the source the compile wrote."
       (latex-to-svg-backend--fall-back "$x$" 'latex nil waiter nil)
       (latex-to-svg-backend--record-failure
        (latex-to-svg-backend--cache-key "$y$" 'latex)
-       (latex-to-svg-backend--failure 'formula 'latex :message "Bad."))
+       (latex-to-svg-backend--failure 'formula 'latex :message "Bad.")
+       (latex-to-svg-backend-tests--stamp 'latex))
       (latex-to-svg-backend--fall-back "$y$" 'latex nil waiter nil)
       (should (equal (mapcar (lambda (o) (plist-get o :message)) outcomes)
                      '("Bad." nil)))
@@ -2893,8 +2921,12 @@ LATEX and OFFSET are as for `latex-to-svg-backend--latex-formula-error'."
 (ert-deftest latex-to-svg-backend-failure-record-holds-the-plist ()
   ;; The record holds what the engine read from its log, and reads back
   ;; with the saved log's path.  It is written as UTF-8, since a message
-  ;; can quote the equation.  A record from 0.14.0 reads with nil fields.
+  ;; can quote the equation.  A record from 0.18.1 or older has no
+  ;; stamp, so it does not hold.
   (let* ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-record" t))
+         (programs (latex-to-svg-backend-tests--fake-programs))
+         (exec-path (cons programs exec-path))
+         (latex-to-svg-backend-latex-program "latex-direct")
          (dir (make-temp-file "l2s-record-src" t))
          (key (latex-to-svg-backend--cache-key "$x^2 + \u03b1$"))
          (old (latex-to-svg-backend--cache-key "$old$"))
@@ -2911,8 +2943,9 @@ LATEX and OFFSET are as for `latex-to-svg-backend--latex-formula-error'."
             (cl-letf (((symbol-function 'display-warning) #'ignore))
               (latex-to-svg-backend--compile-failed
                key "$x^2 + \u03b1$" dir "" 'latex
-               (list :message message :line 1 :column 8))))
-          (should (latex-to-svg-backend--failed-p key))
+               (list :message message :line 1 :column 8) nil
+               (latex-to-svg-backend-tests--stamp 'latex))))
+          (should (latex-to-svg-backend-tests--failure-recorded-p key))
           (should (equal (latex-to-svg-backend--recorded-failure key 'latex)
                          (list :kind 'formula :engine 'latex :message message
                                :line 1 :column 8
@@ -2920,14 +2953,84 @@ LATEX and OFFSET are as for `latex-to-svg-backend--latex-formula-error'."
                                :program nil)))
           (should-not (latex-to-svg-backend-metadata "$x^2 + \u03b1$"))
           (with-temp-file (latex-to-svg-backend--meta-file old)
-            (prin1 '(:failed t) (current-buffer)))
-          (should (equal (latex-to-svg-backend--recorded-failure old 'ratex)
-                         '(:kind formula :engine ratex :message nil :line nil
-                                 :column nil :log nil :program nil)))
+            (prin1 '(:failed t :kind formula :engine latex :message "Old."
+                             :line nil :column nil)
+                   (current-buffer)))
+          (should-not (latex-to-svg-backend--recorded-failure old 'latex))
           (should-not (latex-to-svg-backend--recorded-failure
                        (latex-to-svg-backend--cache-key "$none$") 'latex)))
       (delete-directory dir t)
+      (delete-directory programs t)
       (delete-directory latex-to-svg-backend-cache-directory t))))
+
+(ert-deftest latex-to-svg-backend-failure-record-follows-the-engine ()
+  ;; A recorded failure holds while the engine's program is the one it
+  ;; was recorded with.  Once the program changes, as an update replaces
+  ;; it, or the engine's option names another, the request compiles the
+  ;; equation again, and the new failure replaces the record.
+  (latex-to-svg-backend-tests--with-public-api
+    (let* ((doc "$\\SI{3}{m}$")
+           (key (latex-to-svg-backend--cache-key doc 'ratex))
+           (ratex (expand-file-name "ratex-direct" l2s-test-programs))
+           (request (lambda ()
+                      (latex-to-svg-backend doc :engine 'ratex :quiet t
+                                            :callback #'ignore))))
+      (funcall request)
+      (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
+      (funcall request)
+      (should (= 1 (length l2s-test-processes)))
+      ;; An update of RaTeX.
+      (set-file-times ratex (time-subtract nil 3600))
+      (should-not (latex-to-svg-backend--recorded-failure key 'ratex))
+      (funcall request)
+      (should (= 2 (length l2s-test-processes)))
+      (latex-to-svg-backend-tests--fail-ratex (car l2s-test-processes))
+      (should (equal (plist-get (latex-to-svg-backend--sidecar key) :binary)
+                     (latex-to-svg-backend--file-stamp ratex)))
+      (funcall request)
+      (should (= 2 (length l2s-test-processes)))
+      ;; Another RaTeX, named by the option.
+      (let* ((other (expand-file-name "ratex-other" l2s-test-programs))
+             (latex-to-svg-backend-ratex-program other))
+        (copy-file ratex other)
+        (should-not (latex-to-svg-backend--recorded-failure key 'ratex)))
+      ;; No RaTeX at all: the compile reports the missing program.
+      (let ((latex-to-svg-backend-ratex-program "ratex-missing"))
+        (should-not (latex-to-svg-backend--recorded-failure key 'ratex))))))
+
+(ert-deftest latex-to-svg-backend-toolchain-stamp ()
+  ;; A compile that loaded a `.fmt' file records the TeX files of its
+  ;; stamp, which a request then checks: an update of the distribution's
+  ;; `latex.fmt' or of a package (its tree's `ls-R') compiles the equation
+  ;; again.  Without a `.fmt' file, only the binary is recorded.
+  (let* ((dir (make-temp-file "l2s-toolchain" t))
+         (binary (expand-file-name "pdftex" dir))
+         (base (expand-file-name "latex.fmt" dir))
+         (index (expand-file-name "ls-R" dir)))
+    (unwind-protect
+        (progn
+          (dolist (file (list binary base index))
+            (write-region "" nil file))
+          (let* ((format-stamp (latex-to-svg-backend--format-stamp
+                                binary (list base)
+                                '(("macros.tex" . nil)) t))
+                 (stamp (latex-to-svg-backend--toolchain-stamp
+                         binary format-stamp)))
+            (should (equal stamp
+                           (list :binary (latex-to-svg-backend--file-stamp binary)
+                                 :latex-fmt (latex-to-svg-backend--file-stamp base)
+                                 :ls-r (list (latex-to-svg-backend--file-stamp
+                                              index)))))
+            (should (latex-to-svg-backend--format-fresh-p
+                     (append '(:failed t) stamp) binary))
+            (set-file-times index (time-subtract nil 3600))
+            (should-not (latex-to-svg-backend--format-fresh-p
+                         (append '(:failed t) stamp) binary)))
+          (should (equal (latex-to-svg-backend--toolchain-stamp binary nil)
+                         (list :binary
+                               (latex-to-svg-backend--file-stamp binary))))
+          (should-not (latex-to-svg-backend--toolchain-stamp nil nil)))
+      (delete-directory dir t))))
 
 (ert-deftest latex-to-svg-backend-compile-counts-lines-before-the-equation ()
   ;; `--compile' gives the parser the number of lines before LATEX in
@@ -2940,7 +3043,8 @@ LATEX and OFFSET are as for `latex-to-svg-backend--latex-formula-error'."
            (key (latex-to-svg-backend--cache-key doc))
            (faults nil))
       (cl-letf (((symbol-function 'latex-to-svg-backend--compile-failed)
-                 (lambda (_key _latex _dir &optional _output _engine fault _exit)
+                 (lambda (_key _latex _dir &optional _output _engine fault _exit
+                                _stamp)
                    (push fault faults))))
         (dolist (toolchain (list nil
                                  (append '(:prefix "\\relax\n\\relax\n")
@@ -3322,7 +3426,7 @@ and one in a formula's own black.")
             (when (eq done 'pending)
               (accept-process-output nil 0.1)))
           (should (eq done t))
-          (should (latex-to-svg-backend--failed-p
+          (should (latex-to-svg-backend-tests--failure-recorded-p
                    (latex-to-svg-backend--cache-key doc 'ratex)))
           (should (eq 'latex (latex-to-svg-backend-engine-used doc 'ratex 'latex))))
       (delete-directory latex-to-svg-backend-cache-directory t))))

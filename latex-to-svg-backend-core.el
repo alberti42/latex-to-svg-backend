@@ -1262,13 +1262,40 @@ there is none.  PROGRAM is the program that was not found, for a
                (and log (file-exists-p log) log))
         :program program))
 
-(defun latex-to-svg-backend--record-failure (key failure)
+(defun latex-to-svg-backend--file-stamp (file)
+  "Return (NAME . MTIME) for FILE, or nil when it does not exist.
+NAME is FILE with the symbolic links of its last component followed
+\(`file-chase-links'), and MTIME the modification time of the file it
+names.  `file-attributes' follows the links of the directories, so
+the pair describes the file itself: the `ls-R' that Debian links into
+the tree, or the binary behind `/Library/TeX/texbin/latex'.  It costs
+a fraction of `file-truename', which resolves every component in Lisp
+and takes most of a millisecond for a TeX binary."
+  (let ((name (file-chase-links file)))
+    (when-let* ((mtime (file-attribute-modification-time
+                        (file-attributes name))))
+      (cons name mtime))))
+
+(defun latex-to-svg-backend--file-unchanged-p (entry)
+  "Return non-nil when ENTRY, a (FILE . MTIME) pair, still holds.
+That is when FILE exists and its modification time is MTIME."
+  (and (consp entry)
+       (when-let* ((mtime (file-attribute-modification-time
+                           (file-attributes (car entry)))))
+         (time-equal-p mtime (cdr entry)))))
+
+(defun latex-to-svg-backend--record-failure (key failure &optional stamp)
   "Record in KEY's `.eld' sidecar that the formula failed to compile.
 FAILURE is the plist of `latex-to-svg-backend--failure'.  The record is
-`(:failed t . FAILURE)' without `:log' and `:program': the log is
-found from KEY when the record is read, and a recorded failure is the
-formula's, so no program is missing.  A request that finds it does not
-compile again (see `latex-to-svg-backend'), until
+`(:failed t . FAILURE)' without `:log' and `:program', followed by
+STAMP: the log is found from KEY when the record is read, and a
+recorded failure is the formula's, so no program is missing.  STAMP is
+the plist of (NAME . MTIME) pairs (see
+`latex-to-svg-backend--file-stamp') of the engine's program and of the
+files it was installed with, as `latex-to-svg-backend--format-stamp'
+writes it for a `.fmt' file.  A request that finds the record does not
+compile again (see `latex-to-svg-backend') while STAMP holds, so an
+update of the engine compiles the equation again, and until
 `latex-to-svg-backend-invalidate' deletes it.  Runs in the compile
 sentinel, so a sidecar that cannot be written is reported in the
 buffers waiting for KEY (see `latex-to-svg-backend--warn-waiters'), and
@@ -1282,12 +1309,13 @@ of the equation."
         (with-temp-file (latex-to-svg-backend--meta-file key)
           (let ((print-length nil)
                 (print-level nil))
-            (prin1 (list :failed t
-                         :kind (plist-get failure :kind)
-                         :engine (plist-get failure :engine)
-                         :message (plist-get failure :message)
-                         :line (plist-get failure :line)
-                         :column (plist-get failure :column))
+            (prin1 (append (list :failed t
+                                 :kind (plist-get failure :kind)
+                                 :engine (plist-get failure :engine)
+                                 :message (plist-get failure :message)
+                                 :line (plist-get failure :line)
+                                 :column (plist-get failure :column))
+                           stamp)
                    (current-buffer)))))
     (file-error
      (latex-to-svg-backend--warn-waiters
@@ -1298,7 +1326,7 @@ The equation is compiled again on every request.  %s"
               (latex-to-svg-backend--cache-fix))))))
 
 (defun latex-to-svg-backend--compile-failed
-    (key latex dir &optional process-output engine fault exit)
+    (key latex dir &optional process-output engine fault exit stamp)
   "Handle a failed compile of LATEX by ENGINE for KEY.
 DIR is the scratch directory containing equation.log when LaTeX
 created one.  PROCESS-OUTPUT is the captured stdout and stderr from
@@ -1308,11 +1336,11 @@ available diagnostics is written to the cache directory.
 FAULT non-nil says the engine rejected the formula itself, so
 compiling it again would fail again.  It is the plist (:message MESSAGE
 :line LINE :column COLUMN) the engine read from its output (see
-`latex-to-svg-backend--failure').  The failure is recorded (see
-`latex-to-svg-backend--record-failure'), unless every request waiting
-for KEY is tentative (see `latex-to-svg-backend--tentative-p'), and
-each waiter with a
-fallback (see `latex-to-svg-backend--waiter') is handed to it.  A
+`latex-to-svg-backend--failure').  The failure is recorded with
+STAMP (see `latex-to-svg-backend--record-failure'), unless every
+request waiting for KEY is tentative (see
+`latex-to-svg-backend--tentative-p'), and each waiter with a fallback
+\(see `latex-to-svg-backend--waiter') is handed to it.  A
 missing program, a crash or a killed process is not the formula's
 fault, so it is not recorded and the next request compiles again.
 
@@ -1373,7 +1401,7 @@ echoing an unencodable Unicode character would otherwise make
                :message (latex-to-svg-backend--setup-message engine exit)
                :key key)))))
       (when (and fault (not (latex-to-svg-backend--tentative-p key)))
-        (latex-to-svg-backend--record-failure key outcome))
+        (latex-to-svg-backend--record-failure key outcome stamp))
       (dolist (waiter (gethash key latex-to-svg-backend--pending))
         (let ((fallback (plist-get waiter :fallback))
               (buffer (plist-get waiter :buffer)))

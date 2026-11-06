@@ -63,7 +63,7 @@ Equation numbering used to be the gap: the AUCTeX-based packages compile a whole
 - The programs of one of the three [engines](#engines) on `exec-path`:
   - LaTeX (the default): `latex` and `dvisvgm` 3.1 or later, from any TeX distribution (TeX Live 2024 or later ships it). dvisvgm 3.1 added `--currentcolor`, which makes the SVG color-independent.
   - RaTeX: its `render-svg` program, v0.1.14 or later. No TeX installation. What [Engines](#engines) says about RaTeX was checked with v0.1.14.
-  - texres: `texres` 0.7.8 or later, and `pdftocairo` from Poppler. No TeX Live installation.
+  - texres: `texres` 0.7.8 or later, and `pdftocairo` from Poppler. No TeX Live installation. A preamble that loads `tikz`, or another package that reserves PDF objects with `\pdfobj reserveobjnum`, needs texres 0.7.9: 0.7.8 dumps it, and every equation that loads the `.fmt` file then fails.
 
   When a program of the requested engine is not found, the backend warns once per buffer, naming the engine and the program, and the request returns `nil`. Nothing is recorded: the next request runs the program again, so an equation compiles once the program is installed.
 
@@ -226,7 +226,7 @@ Using TeX's baseline for the `:ascent` follows `org-latex-preview` in [the fork 
 
 ### Failed compiles and the fallback engine
 
-When an engine rejects the formula — RaTeX cannot parse it, or LaTeX stops on an error in the document — the failure is recorded in the equation's `.eld` sidecar as `(:failed t :kind formula :engine ENGINE :message MESSAGE :line LINE :column COLUMN)`, and a later request with the same `:engine` returns `nil` without compiling. A missing program, a crash or a killed process is not the formula's fault, so it is not recorded, and the next request compiles again. A missing program is warned about once per buffer per engine and program: "The texres engine could not run `pdftocairo': program not found." The record belongs to the cache key, so anything that changes the key retries on its own; `latex-to-svg-backend-invalidate` deletes the record for the rest (see [Troubleshooting](#troubleshooting)).
+When an engine rejects the formula — RaTeX cannot parse it, or LaTeX stops on an error in the document — the failure is recorded in the equation's `.eld` sidecar as `(:failed t :kind formula :engine ENGINE :message MESSAGE :line LINE :column COLUMN)`, and a later request with the same `:engine` returns `nil` without compiling. A missing program, a crash or a killed process is not the formula's fault, so it is not recorded, and the next request compiles again. A missing program is warned about once per buffer per engine and program: "The texres engine could not run `pdftocairo': program not found." The record also holds the stamp of the engine's program, as the stamp of a `.fmt` file does: its name and modification time, and for LaTeX those of the distribution's `latex.fmt` and of the `ls-R` file of each TeX tree, from the `.fmt` file the compile loaded. A request honours the record only while these files are unchanged and the program is the one the engine's option names, so an update of the engine compiles the equation again. The record belongs to the cache key, so anything that changes the key retries on its own; `latex-to-svg-backend-invalidate` deletes the record for the rest (see [Troubleshooting](#troubleshooting)).
 
 A failure of a request passed `:tentative t` is not recorded, so a later request for the same equation compiles it again; the callback still gets the failure. Requests for the same equation share one compile, whose failure is recorded unless every one of them is tentative.
 
@@ -509,12 +509,13 @@ Anything that changes the cache key retries on its own: editing the equation,
 `latex-to-svg-backend-preamble-not-precompiled`, `latex-to-svg-backend-line-width`,
 `latex-to-svg-backend-ratex-macros`, or a file listed in
 `latex-to-svg-backend-preamble-package-files` or
-`latex-to-svg-backend-preamble-not-precompiled-files`. Two fixes do not change the key:
-installing a missing TeX package (a `\usepackage` for a `.sty` your TeX
-installation lacks makes every equation fail) and upgrading RaTeX. After
-those, regenerate the equations in the front-end (`C-u C-u C-c C-x C-l` in
-`latex-to-svg`), which calls `latex-to-svg-backend-invalidate`, or call it
-yourself.
+`latex-to-svg-backend-preamble-not-precompiled-files`. An update of the
+engine retries too: a new TeX binary or texres, a new RaTeX, and, with
+`latex-to-svg-backend-precompile` on, an install or update of a TeX
+package, which changes the `ls-R` file of its tree. With precompilation
+off, installing a missing TeX package does not retry: regenerate the
+equations in the front-end (`C-u C-u C-c C-x C-l` in `latex-to-svg`),
+which calls `latex-to-svg-backend-invalidate`, or call it yourself.
 
 ### Stale equations
 
