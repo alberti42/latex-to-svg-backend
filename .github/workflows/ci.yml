@@ -83,16 +83,19 @@ jobs:
 
   render:
     runs-on: ubuntu-latest
-    name: Whole suite against a real Emacs, TeX toolchain and RaTeX
+    name: Whole suite against a real Emacs, TeX toolchain, RaTeX and texres
     # Two kinds of test skip in every job above.  The tests that build an
     # image need an Emacs with librsvg, which the nix builds behind
     # setup-emacs are not -- they are minimal by design, no image support
     # and no window system -- so this job takes Emacs from apt instead.
     # The end-to-end tests run the real programs: latex, dvisvgm and a
     # `.fmt' dump for the LaTeX engine, RaTeX's `render-svg' for the RaTeX
-    # one, and both for the fallback.  The TeX packages are what the
-    # default preamble needs: standalone + varwidth (latex-extra), xcolor
-    # (latex-recommended), amssymb's fonts (fonts-recommended).  `render-svg' comes from a RaTeX release.
+    # one, `texres' and `pdftocairo' (poppler-utils) for the texres one,
+    # and both for the fallback.  The TeX packages are what the default
+    # preamble needs: standalone + varwidth (latex-extra), xcolor
+    # (latex-recommended), amssymb's fonts (fonts-recommended).
+    # `render-svg' comes from a RaTeX release, `texres' from a texres
+    # release.
     steps:
       - uses: actions/checkout@v7
 
@@ -101,7 +104,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             emacs texlive-latex-base texlive-latex-recommended \
-            texlive-latex-extra texlive-fonts-recommended dvisvgm
+            texlive-latex-extra texlive-fonts-recommended dvisvgm \
+            poppler-utils
 
       - name: Install RaTeX
         env:
@@ -112,12 +116,41 @@ jobs:
             | tar --extract --gzip --directory "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/$RATEX" >> "$GITHUB_PATH"
 
+      # The texres tarball is 774 MB.  The cache is keyed on the version,
+      # so the release is downloaded only when the version changes or
+      # GitHub has evicted the entry (unused for 7 days).
+      - name: Restore texres from the cache
+        id: texres-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/texres
+          key: texres-0.7.9-linux-x86_64
+
+      - name: Download texres
+        if: steps.texres-cache.outputs.cache-hit != 'true'
+        env:
+          TEXRES: tex-suite-v0.7.9-linux-x86_64.tar.gz
+          URL: https://github.com/leoliu0/texres/releases/download/v0.7.9
+        run: |
+          mkdir -p "$RUNNER_TEMP/texres"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --remote-name "$URL/$TEXRES"
+          curl --fail --silent --show-error --location "$URL/SHA256SUMS-linux-x86_64.txt" \
+            | grep " $TEXRES\$" | sha256sum --check
+          tar --extract --gzip --file "$TEXRES" --directory "$RUNNER_TEMP/texres"
+          rm "$TEXRES"
+
+      - name: Put texres on the path
+        run: echo "$RUNNER_TEMP/texres/tex-suite-linux-x86_64/bin" >> "$GITHUB_PATH"
+
       - name: Report versions
         run: |
           emacs --version | head -1
           latex --version | head -1
           dvisvgm --version
           command -v render-svg
+          texres --version
+          pdftocairo -v
 
       # The point of this job is that nothing in it skips.  An Emacs
       # without SVG support would skip the image tests silently, so fail
