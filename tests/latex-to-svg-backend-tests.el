@@ -3197,9 +3197,15 @@ and one in a formula's own black.")
 (ert-deftest latex-to-svg-backend-formula-error-end-to-end ()
   ;; The real log gives the message, the line in LATEX and the column:
   ;; `latex' prints the whole line, with the `.fmt' file loaded; texres
-  ;; cuts a long line short.
-  (let ((engines (seq-filter #'latex-to-svg-backend-tools-available-p
-                             '(latex texres))))
+  ;; 0.7.8 and older cut a long line short.
+  (let* ((engines (seq-filter #'latex-to-svg-backend-tools-available-p
+                              '(latex texres)))
+         (texres (and (memq 'texres engines)
+                      (latex-to-svg-backend--texres-version
+                       (executable-find latex-to-svg-backend-texres-program))))
+         (whole-line (lambda (engine)
+                       (or (eq engine 'latex)
+                           (and texres (version<= "0.7.9" texres))))))
     (skip-unless engines)
     (let ((latex-to-svg-backend-cache-directory (make-temp-file "l2s-error-e2e" t))
           (latex-to-svg-backend-precompile t)
@@ -3213,7 +3219,7 @@ and one in a formula's own black.")
             (dolist (engine engines)
               (pcase-dolist (`(,doc ,line ,column)
                              `((,short 3 12)
-                               (,long 1 ,(and (eq engine 'latex)
+                               (,long 1 ,(and (funcall whole-line engine)
                                               (- (length long) (length " + b$"))))))
                 (let ((done 'pending))
                   (latex-to-svg-backend doc :engine engine :quiet t

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- With texres 0.7.9 or later, a failed compile's `:column` is known for a long line too, as with LaTeX.
+
 ## [0.18.1] - 2026-10-29
 
 ### Fixed

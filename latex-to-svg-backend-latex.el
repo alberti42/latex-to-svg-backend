@@ -960,7 +960,7 @@ TeX Live's `latex' reads them from the environment.  They let the log
 show the whole line of an error, which is cut to about 50 characters
 otherwise, so `latex-to-svg-backend--latex-formula-error' finds its
 column.  They change only the log's formatting, so they are not part of
-the cache key.  texres ignores them.")
+the cache key.  texres reads them from version 0.7.9 on.")
 
 (defun latex-to-svg-backend--latex-formula-error (dir latex offset)
   "Return the error LaTeX stopped on in the input, as a plist, or nil.
